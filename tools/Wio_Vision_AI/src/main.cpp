@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <rpcWiFi.h> // Library must be included to open communication lines
+#include <rpcWiFi.h>
 
 void setup() {
     Serial.begin(115200);
@@ -7,23 +7,31 @@ void setup() {
     delay(2000); 
 
     Serial.println("\n=========================================");
-    Serial.println("   WIO TERMINAL: CO-PROCESSOR REGISTER   ");
+    Serial.println("     WIO TERMINAL LOCAL AIRWAVE SCAN     ");
     Serial.println("=========================================");
-    Serial.println("[SYSTEM] Querying Realtek RTL8720 core...");
 
-    // Fetch the version string directly from the secondary chip's hardware layer
-    const char* version = rpc_system_version();
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    delay(100);
 
-    Serial.println("\n------------- HARDWARE INFO -------------");
-    if (version != NULL && strlen(version) > 0) {
-        Serial.print("  -> Active Firmware Version: ");
-        Serial.println(version);
-        Serial.println("-----------------------------------------");
-        Serial.println("\n[STATUS] Hardware communication is open!");
+    Serial.println("[SCANNING] Hunting for available 2.4GHz networks...");
+    int totalNetworks = WiFi.scanNetworks();
+    
+    if (totalNetworks == 0) {
+        Serial.println("[WARNING] No 2.4GHz networks discovered in range.");
     } else {
-        Serial.println("  -> Active Firmware Version: UNREADABLE / CRASHED");
-        Serial.println("-----------------------------------------");
-        Serial.println("\n[STATUS] System mismatch. Core firmware requires an update.");
+        Serial.print("[SUCCESS] Discovered ");
+        Serial.print(totalNetworks);
+        Serial.println(" network(s) nearby:\n");
+
+        for (int i = 0; i < totalNetworks; ++i) {
+            // Print the SSID, Signal Strength (RSSI), and Encryption Type
+            Serial.print("   "); Serial.print(i + 1); Serial.print(": ");
+            Serial.print(WiFi.SSID(i));
+            Serial.print(" ("); Serial.print(WiFi.RSSI(i)); Serial.print(" dBm)");
+            Serial.println((WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " [OPEN]" : " [SECURE]");
+            delay(10);
+        }
     }
     Serial.println("=========================================");
 }

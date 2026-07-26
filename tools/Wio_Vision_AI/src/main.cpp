@@ -1,9 +1,5 @@
 #include <Arduino.h>
-#include <rpcWiFi.h>  
-
-// SECURE DEFINITIONS: These automatically pull from your secrets.ini file during compilation!
-const char* ssid     = SECRET_SSID;     
-const char* password = SECRET_PASS; 
+#include <rpcWiFi.h> // Library must be included to open communication lines
 
 void setup() {
     Serial.begin(115200);
@@ -11,30 +7,25 @@ void setup() {
     delay(2000); 
 
     Serial.println("\n=========================================");
-    Serial.println("  SECURE WI-FI DIAGNOSTIC CONNECTION    ");
+    Serial.println("   WIO TERMINAL: CO-PROCESSOR REGISTER   ");
     Serial.println("=========================================");
-    
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    delay(100);
+    Serial.println("[SYSTEM] Querying Realtek RTL8720 core...");
 
-    Serial.print("Connecting to secure network target...");
-    WiFi.begin(ssid, password);
+    // Fetch the version string directly from the secondary chip's hardware layer
+    const char* version = rpc_system_version();
 
-    int connectionTimer = 0;
-    while (WiFi.status() != WL_CONNECTED && connectionTimer < 60) {
-        delay(500);
-        Serial.print(".");
-        connectionTimer++;
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("\n[SUCCESS] Connected cleanly to your hidden route!");
-        Serial.print("  -> IP Address: ");
-        Serial.println(WiFi.localIP());
+    Serial.println("\n------------- HARDWARE INFO -------------");
+    if (version != NULL && strlen(version) > 0) {
+        Serial.print("  -> Active Firmware Version: ");
+        Serial.println(version);
+        Serial.println("-----------------------------------------");
+        Serial.println("\n[STATUS] Hardware communication is open!");
     } else {
-        Serial.println("\n[FAILURE] Connection failed. Check your secrets.ini settings.");
+        Serial.println("  -> Active Firmware Version: UNREADABLE / CRASHED");
+        Serial.println("-----------------------------------------");
+        Serial.println("\n[STATUS] System mismatch. Core firmware requires an update.");
     }
+    Serial.println("=========================================");
 }
 
 void loop() {

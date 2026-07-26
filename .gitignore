@@ -39,3 +39,23 @@ we2_image_gen_local/Images*.txt
 *.img
 
 .vscode/
+
+# Native Himax AI Firmware Build Directories & Prebuilt Binaries
+EPII_CM55M_APP_S/
+we2_image_gen_local/
+toolchain/
+
+# Extra local testing tools
+tools/wio_i2c_probe/
+tools/wio_uart_monitor/
+
+# PlatformIO internal build environment and cache directories
+.pio/
+.pioenvs/
+.piolibdeps/
+.clang_complete
+.gcc-flags.json
+
+# Operating system metadata files
+.DS_Store
+Thumbs.db

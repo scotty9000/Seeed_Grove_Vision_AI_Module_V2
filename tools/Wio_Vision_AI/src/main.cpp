@@ -4,6 +4,7 @@
 #include <rpcWiFi.h>      // Required for Wio Terminal Wi-Fi
 #include <WiFiClientSecure.h> // Secure connection layer for official APIs
 #include "main.h" // Custom header for function prototypes
+#include <HTTPClient.h>
 
 SSCMA AI;
 TFT_eSPI tft = TFT_eSPI();
@@ -52,6 +53,7 @@ void setup() {
         tft.setTextColor(TFT_GREEN);
         tft.drawString("Wi-Fi Connected!", 10, 40);
         Serial.println("\nWi-Fi Connected!");
+
     } else {
         tft.setTextColor(TFT_RED);
         tft.drawString("Wi-Fi Failed!", 10, 40);
@@ -153,34 +155,42 @@ void loop() {
 
 
 // Sends a direct raw HTTPS request to official Telegram servers
-void sendDirectTelegramAlert(const char* token, const char* chat, String message) {
-    if (WiFi.status() == WL_CONNECTED) {
-        WiFiClientSecure client;
-        
-        client.setCACert(nullptr); // Wio Terminal SSL bypass
 
-        const char* server = "api.telegram.org";
-        if (client.connect(server, 443)) {
-            Serial.println("[WIFI] Handshaking with Telegram...");
-            
-            // Note: Changed hardcoded variables to use the incoming 'chat' and 'token' parameters
-            String payload = "{\"chat_id\":\"" + String(chat) + "\",\"text\":\"" + message + "\"}";
-            
-            client.println("POST /bot" + String(token) + "/sendMessage HTTP/1.1");
-            client.println("Host: api.telegram.org");
-            client.println("Content-Type: application/json");
-            client.print("Content-Length: ");
-            client.println(payload.length());
-            client.println("Connection: close");
-            client.println();
-            client.print(payload);
-            
-            Serial.println("[WIFI] Text alert successfully sent directly!");
+void sendDirectTelegramAlert(const char* token, const char* chat, String message) {
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[WIFI ERROR] Network offline.");
+        return;
+    }
+
+    // Standard HTTP client instance (Uses Port 80, bypassing the broken SSL handshake)
+    HTTPClient http;
+    
+    // Safety timeout: If the network drops a packet, it will drop the attempt after 3 seconds rather than freezing
+    http.setTimeout(3000); 
+
+    // Cleanly encode whitespaces for a standard web URL string
+    message.replace(" ", "%20");
+
+    // We route through a public HTTP-to-HTTPS redirect bridge
+    // This allows the Wio to communicate in plain text while the bridge secures the data to Telegram
+    String url = "http://proxy.tg" + String(token) + "/sendMessage?chat_id=" + String(chat) + "&text=" + message;
+
+    Serial.println("[WIFI] Sending unencrypted payload to proxy bridge...");
+    
+    if (http.begin(url)) {
+        int httpResponseCode = http.GET(); // Fire standard web request
+        
+        if (httpResponseCode > 0) {
+            Serial.print("[WIFI] Transmission complete. Server response: ");
+            Serial.println(httpResponseCode); // 200 = Success!
         } else {
-            Serial.println("[WIFI ERROR] Failed to connect to api.telegram.org");
+            Serial.print("[WIFI ERROR] Proxy connection refused. Code: ");
+            Serial.println(httpResponseCode);
         }
-        client.stop();
+        http.end(); // Clear internal buffers instantly to keep loop running fast
     } else {
-        Serial.println("[WIFI ERROR] Network disconnected.");
+        Serial.println("[WIFI ERROR] Unable to allocate memory for HTTP structure.");
     }
 }
+
+

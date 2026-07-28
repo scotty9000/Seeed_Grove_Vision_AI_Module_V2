@@ -1,196 +1,33 @@
-#include <Seeed_Arduino_SSCMA.h>
-#include <Wire.h> 
-#include <TFT_eSPI.h> 
-#include <rpcWiFi.h>      // Required for Wio Terminal Wi-Fi
-#include <WiFiClientSecure.h> // Secure connection layer for official APIs
-#include "main.h" // Custom header for function prototypes
-#include <HTTPClient.h>
-
-SSCMA AI;
-TFT_eSPI tft = TFT_eSPI();
-
-const int BUZZER_PIN = WIO_BUZZER; 
-
-// --- 1. FILL IN YOUR WI-FI DETAILS ---
-const char* ssid = SECRET_SSID;
-const char* password = SECRET_PASS;
-
-// --- 2. FILL IN YOUR DIRECT TELEGRAM BOT DETAILS ---
-const char* botToken = SECRET_TOKEN;
-const char* chatId = SECRET_ID;
-
-// --- Rate Limiting (Cool-down) ---
-unsigned long lastAlertTime = 0; 
-const unsigned long alertInterval = 60000; // 1 minute cool-down
+#include <Arduino.h>
 
 unsigned long lastHeartbeatTime = 0;
-const unsigned long heartbeatInterval = 2000; // Print a heartbeat every 2000ms (2 seconds)
-bool firstAlertSent = false;
-
+const unsigned long heartbeatInterval = 1000; // Print every 1 second
+uint32_t counter = 0;
 
 void setup() {
+    // Initialize the USB Serial port at 115200 baud
     Serial.begin(115200);
-    delay(2000); 
-    Serial.println("\n[SYSTEM] Serial line initialized. Starting setup...");
-
-    tft.init();
-    tft.setRotation(3); 
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextColor(TFT_WHITE);
-    tft.setTextSize(2);
-    tft.drawString("Connecting Wi-Fi...", 10, 10);
-    tft.drawLine(0, 35, 320, 35, TFT_BLUE);
-
-    WiFi.begin(ssid, password);
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-        delay(500);
-        Serial.print(".");
-        attempts++;
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-        tft.setTextColor(TFT_GREEN);
-        tft.drawString("Wi-Fi Connected!", 10, 40);
-        Serial.println("\nWi-Fi Connected!");
-
-    } else {
-        tft.setTextColor(TFT_RED);
-        tft.drawString("Wi-Fi Failed!", 10, 40);
-    }
-    delay(1000);
-
-    pinMode(BUZZER_PIN, OUTPUT);
-    digitalWrite(BUZZER_PIN, LOW);
-
-    Wire.begin(); 
-    Wire.setClock(400000); 
     
-    if (!AI.begin(&Wire)) {
-        tft.fillScreen(TFT_BLACK);
-        tft.setTextColor(TFT_RED);
-        tft.drawString("Camera Wire Dead!", 10, 40);
-        while (1); 
-    }
-
-    tft.fillRect(0, 40, 320, 200, TFT_BLACK);
-    tft.setTextColor(TFT_DARKGREEN);
-    tft.drawString("[SCANNING] Awaiting stream...", 10, 110);
+    // Safety delay to allow the PC to recognize the new XIAO COM port on boot
+    delay(3000); 
+    
+    Serial.println("\n====================================");
+    Serial.println("[SYSTEM] XIAO ESP32-C3 Boot Successful!");
+    Serial.println("====================================");
 }
 
 void loop() {
-    // Fast Filter Stream Mode (No image requested)
-    int status = AI.invoke(1, true, false);
-    
-    if (status == 0) { 
-        int targetCount = AI.boxes().size();
-        
-        if (targetCount > 0) {
-            // 1. UPDATE THE HARDWARE SCREEN LAYER IMMEDIATELY
-            tft.fillRect(0, 80, 320, 160, TFT_BLACK); 
-            tft.setTextColor(TFT_RED);
-            tft.drawString("ALERT: Person Spotted!", 10, 100);
-            
-            int score = AI.boxes()[0].score; // Grabs confidence of first target
-            tft.setTextColor(TFT_WHITE);
-            tft.drawString("Confidence: " + String(score) + "%", 10, 130);
-
-            // 2. HARDWARE AUDIO BUZZ
-            analogWrite(BUZZER_PIN, 128); 
-            delay(100);
-            analogWrite(BUZZER_PIN, 0); 
-
-            // 3. FORCE SERIAL PRINT (This proves the match logic is executed by the compiler)
-            Serial.print("\n=== [MATCH DETECTED] Screen score matches serial: ");
-            Serial.print(score);
-            Serial.println("% ===");
-
-            // 4. WI-FI NETWORK EXECUTION
-            unsigned long currentTime = millis();
-            String alertMsg = "Security Alert: A person was detected with " + String(score) + "% confidence!";
-
-            if (!firstAlertSent) {
-                // First match ever: bypass countdown and fire instantly
-                Serial.println("[WIFI] First match detected! Sending immediate payload...");
-                
-                firstAlertSent = true;
-                lastAlertTime = currentTime; 
-                
-                sendDirectTelegramAlert(botToken, chatId, alertMsg);
-            } 
-            else if (currentTime - lastAlertTime >= alertInterval) {
-                // Future matches: fire only if the 1-minute window has passed
-                Serial.println("[WIFI] Interval elapsed. Sending network payload...");
-                
-                lastAlertTime = currentTime;
-                
-                sendDirectTelegramAlert(botToken, chatId, alertMsg);
-            } 
-            else {
-                // Still inside the quiet window
-                Serial.print("[WIFI SKIPPED] Cooldown remaining: ");
-                Serial.print((alertInterval - (currentTime - lastAlertTime)) / 1000);
-                Serial.println("s");
-            }
-        } 
-        else {
-            // No target found in this frame execution loop
-            tft.fillRect(0, 80, 320, 160, TFT_BLACK); 
-            tft.setTextColor(TFT_DARKGREEN);
-            tft.drawString("[SCANNING] Area Clear.", 10, 110);
-        }
-    }
-    
-    // --- SYSTEM SERIAL HEARTBEAT ---
     unsigned long currentMillis = millis();
+    
+    // Print a heartbeat every second
     if (currentMillis - lastHeartbeatTime >= heartbeatInterval) {
-        Serial.print("[HEARTBEAT] System is alive. Uptime: ");
+        counter++;
+        Serial.print("[HEARTBEAT] XIAO C3 is running. Count: ");
+        Serial.print(counter);
+        Serial.print(" | Uptime: ");
         Serial.print(currentMillis / 1000);
         Serial.println("s");
+        
         lastHeartbeatTime = currentMillis;
     }
-    
-    delay(60); 
 }
-
-
-// Sends a direct raw HTTPS request to official Telegram servers
-
-void sendDirectTelegramAlert(const char* token, const char* chat, String message) {
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[WIFI ERROR] Network offline.");
-        return;
-    }
-
-    // Standard HTTP client instance (Uses Port 80, bypassing the broken SSL handshake)
-    HTTPClient http;
-    
-    // Safety timeout: If the network drops a packet, it will drop the attempt after 3 seconds rather than freezing
-    http.setTimeout(3000); 
-
-    // Cleanly encode whitespaces for a standard web URL string
-    message.replace(" ", "%20");
-
-    // We route through a public HTTP-to-HTTPS redirect bridge
-    // This allows the Wio to communicate in plain text while the bridge secures the data to Telegram
-    String url = "http://proxy.tg" + String(token) + "/sendMessage?chat_id=" + String(chat) + "&text=" + message;
-
-    Serial.println("[WIFI] Sending unencrypted payload to proxy bridge...");
-    
-    if (http.begin(url)) {
-        int httpResponseCode = http.GET(); // Fire standard web request
-        
-        if (httpResponseCode > 0) {
-            Serial.print("[WIFI] Transmission complete. Server response: ");
-            Serial.println(httpResponseCode); // 200 = Success!
-        } else {
-            Serial.print("[WIFI ERROR] Proxy connection refused. Code: ");
-            Serial.println(httpResponseCode);
-        }
-        http.end(); // Clear internal buffers instantly to keep loop running fast
-    } else {
-        Serial.println("[WIFI ERROR] Unable to allocate memory for HTTP structure.");
-    }
-}
-
-

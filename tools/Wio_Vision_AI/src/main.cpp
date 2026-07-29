@@ -5,6 +5,7 @@
 #include <Wire.h>
 #include <Seeed_Arduino_SSCMA.h>
 #include "main.h" // Holds your function prototype declarations
+#include "secrets.h" // Contains your Wi-Fi and Telegram credentials
 
 SSCMA AI;
 
@@ -55,61 +56,84 @@ void setup() {
     Serial.println("[SYSTEM] Setup Ready. Awaiting filtered camera streams...");
 }
 
+// Create a state flag tracker at the top of your loop (or add to your global variables)
+bool isAwaitingPhotoFetch = false;
+
 void loop() {
-    // 1. FAST SCANNER MODE
-    int status = AI.invoke(1, true, false);
     
-    if (status == 0) { 
-        int targetCount = AI.boxes().size();
+    // --- STATE PATH A: HIGH-OVERHEAD IMAGE FETCH ---
+    if (isAwaitingPhotoFetch) {
+        Serial.println("\n[CAMERA] State Active: Executing isolated Step 2 photo fetch...");
+        delay(200); // Allow the camera to stabilize before invoking the fetch
+        int statusStep2 = AI.invoke(1, false, true);
         
-        if (targetCount > 0) {
-            int score = AI.boxes()[0].score; // Explicit index 0 points to the primary tracked box
+        if (statusStep2 == 0) {
+            String livePhoto = AI.last_image();
             
-            Serial.print("\n=== [MATCH DETECTED] Person tracked at score: ");
-            Serial.print(score);
-            Serial.println("% ===");
-
-            // --- WI-FI DIRECT SECURE TELEGRAM PHOTO EXECUTION ---
-            unsigned long currentTime = millis();
-            String alertMsg = "Security Alert: A person was detected with " + String(score) + "% confidence!";
-
-            bool sendNow = false;
-            if (!firstAlertSent) {
-                Serial.println("[WIFI] First match detected! Preparing instant photo alert...");
-                firstAlertSent = true;
-                lastAlertTime = currentTime; 
-                sendNow = true;
-            } 
-            else if (currentTime - lastAlertTime >= alertInterval) {
-                Serial.println("[WIFI] Interval elapsed. Preparing secure photo alert...");
-                lastAlertTime = currentTime;
-                sendNow = true;
-            } 
-            else {
-                Serial.print("[WIFI SKIPPED] Cooldown remaining: ");
-                Serial.print((alertInterval - (currentTime - lastAlertTime)) / 1000);
-                Serial.println("s");
+            if (livePhoto.length() > 0) {
+                // Re-extract the score from the existing box buffer to include in our caption
+                int score = (AI.boxes().size() > 0) ? AI.boxes()[0].score : 50;
+                String alertMsg = "Security Alert: A person was detected with " + String(score) + "% confidence!";
+                
+                // Dispatch your piece-by-piece text file document utility
+                sendTelegramTextFileAlert(botToken, chatId, livePhoto, alertMsg);
+            } else {
+                Serial.println("[CAMERA ERROR] Step 2 image extraction buffer returned empty.");
             }
+        } else {
+            Serial.print("[CAMERA ERROR] Step 2 Image Fetch failed with code: ");
+            Serial.println(statusStep2);
+        }
+        
+        // 🌟 CRITICAL: Immediately flip back to scanner mode for the next loop iteration
+        isAwaitingPhotoFetch = false;
+    }
+    
+    // --- STATE PATH B: LIGHTWEIGHT MONITOR SCAN ---
+    else {
+        int statusStep1 = AI.invoke(1, true, false);
+        
+        if (statusStep1 == 0) { 
+            int targetCount = AI.boxes().size();
+            
+            if (targetCount > 0) {
+                int score = AI.boxes()[0].score;
+                
+                Serial.print("\n=== [MATCH DETECTED] Person tracked at score: ");
+                Serial.print(score);
+                Serial.println("% ===");
 
-            if (sendNow) {
-                // 3. THE SWITCH: Request raw base64 image data string
-                if (AI.invoke(1, false, true) == CMD_OK) {
-                    String livePhoto = AI.last_image();
-                    
-                    if (livePhoto.length() > 0) {
-                        sendTelegramPhotoAlert(botToken, chatId, livePhoto, alertMsg);
-                    } else {
-                        Serial.println("[CAMERA ERROR] Image extraction buffer returned empty.");
-                    }
-                } else {
-                    Serial.println("[CAMERA ERROR] Frame invocation failed during photo request.");
+                // Check our Wi-Fi rate-limiting cooldown timers
+                unsigned long currentTime = millis();
+                bool sendNow = false;
+                
+                if (!firstAlertSent) {
+                    Serial.println("[WIFI] First match detected! Queueing Step 2 photo state...");
+                    firstAlertSent = true;
+                    lastAlertTime = currentTime; 
+                    sendNow = true;
+                } 
+                else if (currentTime - lastAlertTime >= alertInterval) {
+                    Serial.println("[WIFI] Interval elapsed. Queueing Step 2 photo state...");
+                    lastAlertTime = currentTime;
+                    sendNow = true;
+                } 
+                else {
+                    Serial.print("[WIFI SKIPPED] Cooldown remaining: ");
+                    Serial.print((alertInterval - (currentTime - lastAlertTime)) / 1000);
+                    Serial.println("s");
+                }
+
+                if (sendNow) {
+                    // 🌟 CRITICAL: Instead of triggering Step 2 here, we just flip the flag.
+                    // The microcontroller will finish this loop and execute Step 2 freshly on the next turn.
+                    isAwaitingPhotoFetch = true;
                 }
             }
+        } else {
+            Serial.print("[STEP 1 SCAN] Result code: ");
+            Serial.println(statusStep1);
         }
-    } else {
-        // 🌟 THE EXPLICIT TRACKER: Prints whenever the I2C camera bus returns something other than 0
-        Serial.print("[CAMERA STATUS] Invoke returned error code: ");
-        Serial.println(status);
     }
 
     // --- SYSTEM SERIAL HEARTBEAT ---
@@ -124,9 +148,7 @@ void loop() {
     delay(60); 
 }
 
-
-
-void sendTelegramPhotoAlert(const char* token, const char* chat, String base64ImageStr, String captionText) {
+void sendTelegramTextFileAlert(const char* token, const char* chat, String base64ImageStr, String captionText) {
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[WIFI ERROR] Network offline. Abandoning request.");
         return;
@@ -141,27 +163,29 @@ void sendTelegramPhotoAlert(const char* token, const char* chat, String base64Im
         return;
     }
 
-    Serial.println("[WIFI] Secure socket open. Preparing chunked photo transmission...");
+    Serial.println("[WIFI] Secure socket open. Preparing chunked Base64 file transmission...");
 
-    // Create a strict multipart boundary marker to separate our form elements
+    // Create a strict boundary marker for the multipart layout headers
     String boundary = "----XIAOESP32C3MultipartBoundary";
     
-    // Assemble the HTTP form headers
-    String head = "--" + boundary + "\r\n" +
-                  "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n" + String(chat) + "\r\n" +
-                  "--" + boundary + "\r\n" +
-                  "Content-Disposition: form-data; name=\"caption\"\r\n\r\n" + captionText + "\r\n" +
-                  "--" + boundary + "\r\n" +
-                  "Content-Disposition: form-data; name=\"photo\"; filename=\"alert.jpg\"\r\n" +
-                  "Content-Type: image/jpeg\r\n\r\n";
+    // Assemble the HTTP form body headers piece-by-piece
+    String head = "--" + boundary + "\r\n";
+    head += "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n";
+    head += String(chat) + "\r\n";
+    head += "--" + boundary + "\r\n";
+    head += "Content-Disposition: form-data; name=\"caption\"\r\n\r\n";
+    head += captionText + "\r\n";
+    head += "--" + boundary + "\r\n";
+    head += "Content-Disposition: form-data; name=\"document\"; filename=\"alert.txt\"\r\n";
+    head += "Content-Type: text/plain\r\n\r\n";
                   
     String tail = "\r\n--" + boundary + "--\r\n";
 
-    // Calculate total layout length so Telegram's server knows exactly when the payload finishes
+    // Calculate the total exact size of our payload parts combined
     uint32_t totalLength = head.length() + base64ImageStr.length() + tail.length();
 
-    // Stream out standard HTTP POST header instructions to the Telegram api
-    client.println("POST /bot" + String(token) + "/sendPhoto HTTP/1.1");
+    // Send the raw HTTP/1.1 POST instructions out to the socket channel
+    client.println("POST /bot" + String(token) + "/sendDocument HTTP/1.1");
     client.println("Host: api.telegram.org");
     client.println("Content-Type: multipart/form-data; boundary=" + boundary);
     client.print("Content-Length: ");
@@ -169,23 +193,23 @@ void sendTelegramPhotoAlert(const char* token, const char* chat, String base64Im
     client.println("Connection: close");
     client.println(); // Terminal empty header line
 
-    // Step A: Transmit the Form data variables
+    // Step A: Transmit the starting Form variables text
     client.print(head);
 
-    // Step B: Stream the Base64 payload out in small 512-byte slices to protect internal RAM bounds
+    // Step B: Stream the long Base64 payload out in small 512-byte slices to protect RAM bounds
     int totalBytes = base64ImageStr.length();
     int chunkSize = 512;
-    Serial.print("[WIFI] Streaming photo bytes: ");
+    Serial.print("[WIFI] Streaming raw text payload: ");
     
     for (int i = 0; i < totalBytes; i += chunkSize) {
         int currentChunk = min(chunkSize, totalBytes - i);
         client.print(base64ImageStr.substring(i, i + currentChunk));
         Serial.print(".");
-        delay(5); // Soft millisecond pause ensures the Wi-Fi hardware buffers do not overflow
+        delay(5); // Soft pause ensures internal Wi-Fi hardware arrays don't drop packets
     }
     Serial.println(" Done!");
 
-    // Step C: Transmit the closing form tail wrap
+    // Step C: Transmit the final multipart closing boundary tail
     client.print(tail);
 
     // Monitor for a brief server acknowledgment confirmation response line
@@ -204,4 +228,3 @@ void sendTelegramPhotoAlert(const char* token, const char* chat, String base64Im
 
     client.stop();
 }
-

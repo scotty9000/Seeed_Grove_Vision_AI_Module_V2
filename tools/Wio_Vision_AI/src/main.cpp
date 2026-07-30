@@ -4,14 +4,16 @@
 
 SSCMA AI;
 unsigned long lastCheckTime = 0;
-const unsigned long checkInterval = 500; // Faster 500ms sampling for smooth gameplay
+// 🌟 TWEAK: Shifting to a fast 200ms sampling rate for instant gesture capture.
+// Because the filter cuts repetitive traffic, this fast rate won't overwhelm the bus.
+const unsigned long checkInterval = 200; 
 
 void setup() {
     Serial.begin(115200);
     while(!Serial); 
     
     Serial.println("\n================================================");
-    Serial.println("[🎮 GAME INTERCEPT] Rock, Paper, Scissors Pro");
+    Serial.println("[🎮 FILTER MODE] Rock, Paper, Scissors Pro");
     Serial.println("================================================");
 
     Wire.begin(6, 7); 
@@ -21,7 +23,7 @@ void setup() {
         Serial.println("[❌ ERROR] Handshake failed over I2C layout.");
         while (1) { delay(1000); }
     }
-    Serial.println("[SUCCESS] Live tracking ready. Show your move!");
+    Serial.println("[SUCCESS] Filter engine armed. Show a gesture and hold it still!");
 }
 
 void loop() {
@@ -30,25 +32,25 @@ void loop() {
     if (currentMillis - lastCheckTime >= checkInterval) {
         lastCheckTime = currentMillis;
 
-        // Execute inference pass (loops=1, filter=false, request_image=false)
-        int status = AI.invoke(1, false, false);
+        // 🌟 THE FILTER FIX:
+        // Param 1: loops = 1
+        // Param 2: filter = true  -> ONLY trigger a response if the gesture changes!
+        // Param 3: show = false   -> Bypasses large image string loads
+        int status = AI.invoke(1, true, false);
 
-        // 🌟 THE FIX: If status is 3 or there are no boxes, the frame is empty/covered.
-        // We force a clear state immediately instead of letting old values linger.
-        if (status == 3 || AI.boxes().size() == 0) {
-            Serial.println("❌ No gesture detected (Empty or Covered Frame)");
-        } 
-        else if (AI.boxes().size() > 0) {
+        // If the current frame matches the previous frame, status returns a non-success flag 
+        // or the library skips loading new boxes, keeping the console completely clean.
+        if (AI.boxes().size() > 0) {
             
-            // Look directly at the primary bounding box tracking array
             int targetID = AI.boxes()[0].target;
             int confidence = AI.boxes()[0].score;
 
-            // Enforce a strict minimum certainty filter to prevent false detections
             if (confidence > 55) {
-                Serial.print("[DETECTED] ");
-                
-                // 🌟 OFFICIAL SEEED GESTURE INDEX MAPPINGS:
+                // Log the timestamp to prove it only updates when the hand moves
+                Serial.print("[NEW EVENT @ ");
+                Serial.print(millis() / 1000);
+                Serial.print("s] -> ");
+
                 if (targetID == 0) {
                     Serial.print("✋ PAPER! ");
                 } else if (targetID == 1) {
@@ -56,7 +58,7 @@ void loop() {
                 } else if (targetID == 2) {
                     Serial.print("✌️ SCISSORS! ");
                 } else {
-                    Serial.print("Unknown Item (ID: ");
+                    Serial.print("Unknown Class (ID: ");
                     Serial.print(targetID);
                     Serial.print(") ");
                 }
@@ -64,8 +66,6 @@ void loop() {
                 Serial.print("(Certainty: ");
                 Serial.print(confidence);
                 Serial.println("%)");
-            } else {
-                Serial.println("🤔 Reading unstable... hold your hand still.");
             }
         }
     }

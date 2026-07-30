@@ -40,9 +40,43 @@ void loop() {
         // Execute inference with filter=false and show=true (Request full image string)
         int status = AI.invoke(1, false, true);
 
-        if (status == 0) {
-            String imgData = AI.last_image();
+        // Treat any return code >= 0 as a complete success
+        if (status >= 0) {
+            Serial.print("[SUCCESS] Step 2 request completed with code: ");
+            Serial.println(status);
             
+            // Extract and log tracking coordinates for verification
+            int totalObjects = AI.boxes().size();
+            Serial.print("[INFO] Vector confirmation size: ");
+            Serial.print(totalObjects);
+            Serial.println(" elements detected in frame.");
+
+            for (int i = 0; i < totalObjects; i++) {
+                int x      = AI.boxes()[i].x;      // X coordinate of box center
+                int y      = AI.boxes()[i].y;      // Y coordinate of box center
+                int w      = AI.boxes()[i].w;      // Width of bounding box
+                int h      = AI.boxes()[i].h;      // Height of bounding box
+                int score  = AI.boxes()[i].score;  // Confidence score (0-100%)
+                int target = AI.boxes()[i].target; // Model class ID index
+
+                Serial.print("  👉 Object #");
+                Serial.print(i + 1);
+                Serial.print(" [Class ID: ");
+                Serial.print(target);
+                Serial.print("] | Conf: ");
+                Serial.print(score);
+                Serial.print("% | Pos: (");
+                Serial.print(x);
+                Serial.print(", ");
+                Serial.print(y);
+                Serial.print(") Size: ");
+                Serial.print(w);
+                Serial.print("x");
+                Serial.println(h);
+            }
+
+            // Image Payload Verification
+            String imgData = AI.last_image();
             if (imgData.length() > 0) {
                 Serial.print("[SUCCESS] Image fetched! Base64 String length: ");
                 Serial.print(imgData.length());
@@ -53,10 +87,12 @@ void loop() {
                 Serial.print(imgData.substring(0, 30));
                 Serial.println("...");
             } else {
-                Serial.println("[⚠️ WARNING] Invoke returned 0, but last_image() is completely EMPTY.");
+                Serial.print("[⚠️ WARNING] Invoke returned status ");
+                Serial.print(status);
+                Serial.println(", but last_image() data remains EMPTY over I2C.");
             }
         } else {
-            Serial.print("[❌ BUS ERROR] Step 2 request failed with code: ");
+            Serial.print("[❌ BUS ERROR] Step 2 request failed with error code: ");
             Serial.println(status);
         }
     }

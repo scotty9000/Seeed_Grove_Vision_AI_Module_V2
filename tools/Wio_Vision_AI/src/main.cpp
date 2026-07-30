@@ -4,26 +4,27 @@
 
 SSCMA AI;
 unsigned long lastCheckTime = 0;
-// 🌟 TWEAK: Shifting to a fast 200ms sampling rate for instant gesture capture.
-// Because the filter cuts repetitive traffic, this fast rate won't overwhelm the bus.
+// We can now safely poll every 200ms for fast, snappy gesture detection
 const unsigned long checkInterval = 200; 
+
+int lastDetectedID = -1; // Tracks the previous gesture state to handle changes
 
 void setup() {
     Serial.begin(115200);
     while(!Serial); 
     
     Serial.println("\n================================================");
-    Serial.println("[🎮 FILTER MODE] Rock, Paper, Scissors Pro");
+    Serial.println("[⚡ HIGH-SPEED ENGINE] Optimized Dual-Speed Loop");
     Serial.println("================================================");
 
     Wire.begin(6, 7); 
     Wire.setClock(400000); 
     
     if (!AI.begin(&Wire)) {
-        Serial.println("[❌ ERROR] Handshake failed over I2C layout.");
+        Serial.println("[❌ ERROR] Handshake failed.");
         while (1) { delay(1000); }
     }
-    Serial.println("[SUCCESS] Filter engine armed. Show a gesture and hold it still!");
+    Serial.println("[SUCCESS] High-speed monitoring running...");
 }
 
 void loop() {
@@ -32,40 +33,50 @@ void loop() {
     if (currentMillis - lastCheckTime >= checkInterval) {
         lastCheckTime = currentMillis;
 
-        // 🌟 THE FILTER FIX:
-        // Param 1: loops = 1
-        // Param 2: filter = true  -> ONLY trigger a response if the gesture changes!
-        // Param 3: show = false   -> Bypasses large image string loads
-        int status = AI.invoke(1, true, false);
+        // 🌟 SPEED FIX 1: Send show = false for rapid real-time gesture tracking
+        // This transaction is incredibly lightweight and clears the bus instantly
+        int status = AI.invoke(1, false, false);
 
-        // If the current frame matches the previous frame, status returns a non-success flag 
-        // or the library skips loading new boxes, keeping the console completely clean.
-        if (AI.boxes().size() > 0) {
-            
-            int targetID = AI.boxes()[0].target;
-            int confidence = AI.boxes()[0].score;
+        if (status >= 0) {
+            if (AI.boxes().size() > 0) {
+                // 🌟 FIXED ARRAYS: Access elements out of index position 0 of the vector array
+                int currentID = AI.boxes()[0].target;
+                int confidence = AI.boxes()[0].score;
 
-            if (confidence > 55) {
-                // Log the timestamp to prove it only updates when the hand moves
-                Serial.print("[NEW EVENT @ ");
-                Serial.print(millis() / 1000);
-                Serial.print("s] -> ");
+                if (confidence > 55) {
+                    // 🌟 SPEED FIX 2: Only fetch image text when a NEW gesture event drops in
+                    if (currentID != lastDetectedID) {
+                        lastDetectedID = currentID; // Update state machine
 
-                if (targetID == 0) {
-                    Serial.print("✋ PAPER! ");
-                } else if (targetID == 1) {
-                    Serial.print("✊ ROCK! ");
-                } else if (targetID == 2) {
-                    Serial.print("✌️ SCISSORS! ");
-                } else {
-                    Serial.print("Unknown Class (ID: ");
-                    Serial.print(targetID);
-                    Serial.print(") ");
+                        Serial.println("\n------------------------------------------------");
+                        Serial.print("[🎯 NEW GESTURE] Result: ");
+                        if (currentID == 0) Serial.print("✋ PAPER! ");
+                        else if (currentID == 1) Serial.print("✊ ROCK! ");
+                        else if (currentID == 2) Serial.print("✌️ SCISSORS! ");
+                        Serial.print("(Certainty: ");
+                        Serial.print(confidence);
+                        Serial.println("%)");
+
+                        // Now that a change event is confirmed, execute a targeted image pull
+                        Serial.println(" ➔ Fetching snapshot bytes via I2C...");
+                        AI.invoke(1, false, true); 
+                        
+                        size_t payloadSize = AI.last_image().length();
+                        Serial.print(" ➔ Image Payload Size: ");
+                        Serial.print(payloadSize);
+                        Serial.println(" characters.");
+                        
+                        Serial.print(" ➔ Data Preview: ");
+                        Serial.print(AI.last_image().substring(0, 40));
+                        Serial.println("...");
+                    }
                 }
-                
-                Serial.print("(Certainty: ");
-                Serial.print(confidence);
-                Serial.println("%)");
+            } else {
+                // If no hands are visible, reset our tracker state
+                if (lastDetectedID != -1) {
+                    Serial.println("\n[-] Hand removed. Re-arming high-speed scanner.");
+                    lastDetectedID = -1;
+                }
             }
         }
     }

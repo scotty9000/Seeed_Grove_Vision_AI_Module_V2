@@ -3,97 +3,70 @@
 #include <Seeed_Arduino_SSCMA.h>
 
 SSCMA AI;
-unsigned long lastCaptureTime = 0;
-const unsigned long captureInterval = 1000; // Force capture exactly every 1 second
-uint32_t captureCount = 0;
+unsigned long lastCheckTime = 0;
+const unsigned long checkInterval = 500; // Faster 500ms sampling for smooth gameplay
 
 void setup() {
     Serial.begin(115200);
-    delay(3000); // USB port sync window
+    while(!Serial); 
+    
     Serial.println("\n================================================");
-    Serial.println("[DIAGNOSIS] Starting Isolated Step 2 Test Loop...");
+    Serial.println("[🎮 GAME INTERCEPT] Rock, Paper, Scissors Pro");
     Serial.println("================================================");
 
-    // Initialize I2C bus parameters
-    Wire.begin(); 
-    Wire.setClock(400000); // 400kHz high-speed configuration
+    Wire.begin(6, 7); 
+    Wire.setClock(400000); 
     
     if (!AI.begin(&Wire)) {
-        Serial.println("[❌ CRITICAL ERROR] Camera board not found on I2C bus!");
+        Serial.println("[❌ ERROR] Handshake failed over I2C layout.");
         while (1) { delay(1000); }
     }
-
-    Serial.println("[SUCCESS] Hardware found. Beginning 1-second image stream...");
+    Serial.println("[SUCCESS] Live tracking ready. Show your move!");
 }
 
 void loop() {
     unsigned long currentMillis = millis();
 
-    if (currentMillis - lastCaptureTime >= captureInterval) {
-        lastCaptureTime = currentMillis;
-        captureCount++;
+    if (currentMillis - lastCheckTime >= checkInterval) {
+        lastCheckTime = currentMillis;
 
-        Serial.println("\n------------------------------------------------");
-        Serial.print("[TEST] Dispatched Step 2 Capture #");
-        Serial.println(captureCount);
+        // Execute inference pass (loops=1, filter=false, request_image=false)
+        int status = AI.invoke(1, false, false);
 
-        // Execute inference with filter=false and show=true (Request full image string)
-        int status = AI.invoke(1, false, true);
-
-        // Treat any return code >= 0 as a complete success
-        if (status >= 0) {
-            Serial.print("[SUCCESS] Step 2 request completed with code: ");
-            Serial.println(status);
+        // 🌟 THE FIX: If status is 3 or there are no boxes, the frame is empty/covered.
+        // We force a clear state immediately instead of letting old values linger.
+        if (status == 3 || AI.boxes().size() == 0) {
+            Serial.println("❌ No gesture detected (Empty or Covered Frame)");
+        } 
+        else if (AI.boxes().size() > 0) {
             
-            // Extract and log tracking coordinates for verification
-            int totalObjects = AI.boxes().size();
-            Serial.print("[INFO] Vector confirmation size: ");
-            Serial.print(totalObjects);
-            Serial.println(" elements detected in frame.");
+            // Look directly at the primary bounding box tracking array
+            int targetID = AI.boxes()[0].target;
+            int confidence = AI.boxes()[0].score;
 
-            for (int i = 0; i < totalObjects; i++) {
-                int x      = AI.boxes()[i].x;      // X coordinate of box center
-                int y      = AI.boxes()[i].y;      // Y coordinate of box center
-                int w      = AI.boxes()[i].w;      // Width of bounding box
-                int h      = AI.boxes()[i].h;      // Height of bounding box
-                int score  = AI.boxes()[i].score;  // Confidence score (0-100%)
-                int target = AI.boxes()[i].target; // Model class ID index
-
-                Serial.print("  👉 Object #");
-                Serial.print(i + 1);
-                Serial.print(" [Class ID: ");
-                Serial.print(target);
-                Serial.print("] | Conf: ");
-                Serial.print(score);
-                Serial.print("% | Pos: (");
-                Serial.print(x);
-                Serial.print(", ");
-                Serial.print(y);
-                Serial.print(") Size: ");
-                Serial.print(w);
-                Serial.print("x");
-                Serial.println(h);
-            }
-
-            // Image Payload Verification
-            String imgData = AI.last_image();
-            if (imgData.length() > 0) {
-                Serial.print("[SUCCESS] Image fetched! Base64 String length: ");
-                Serial.print(imgData.length());
-                Serial.println(" characters.");
+            // Enforce a strict minimum certainty filter to prevent false detections
+            if (confidence > 55) {
+                Serial.print("[DETECTED] ");
                 
-                // Print just the first 30 characters of the string to prove data exists without flooding serial
-                Serial.print("[DATA PREVIEW] ");
-                Serial.print(imgData.substring(0, 30));
-                Serial.println("...");
+                // 🌟 OFFICIAL SEEED GESTURE INDEX MAPPINGS:
+                if (targetID == 0) {
+                    Serial.print("✋ PAPER! ");
+                } else if (targetID == 1) {
+                    Serial.print("✊ ROCK! ");
+                } else if (targetID == 2) {
+                    Serial.print("✌️ SCISSORS! ");
+                } else {
+                    Serial.print("Unknown Item (ID: ");
+                    Serial.print(targetID);
+                    Serial.print(") ");
+                }
+                
+                Serial.print("(Certainty: ");
+                Serial.print(confidence);
+                Serial.println("%)");
             } else {
-                Serial.print("[⚠️ WARNING] Invoke returned status ");
-                Serial.print(status);
-                Serial.println(", but last_image() data remains EMPTY over I2C.");
+                Serial.println("🤔 Reading unstable... hold your hand still.");
             }
-        } else {
-            Serial.print("[❌ BUS ERROR] Step 2 request failed with error code: ");
-            Serial.println(status);
         }
     }
 }

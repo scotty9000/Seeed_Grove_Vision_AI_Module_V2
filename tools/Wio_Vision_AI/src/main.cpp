@@ -6,7 +6,7 @@
 #include "mbedtls/base64.h"
 #include "secrets.h"
 
-// 🌟 STEP 1: CONFIGURE NETWORK CREDENTIALS
+//🌟 STEP 1: CONFIGURE NETWORK CREDENTIALS
 const char* ssid     = SECRET_SSID;
 const char* password = SECRET_PASS;
 
@@ -20,13 +20,16 @@ unsigned char staticBinaryBuffer[STATIC_BUFFER_SIZE];
 
 SSCMA AI;
 unsigned long lastCheckTime = 0;
-const unsigned long checkInterval = 200; // Snappy background scanning tracking
+const unsigned long checkInterval = 200; // Snappy 200ms camera scan rate
 
-// ANTI-BOMBARDMENT VARIABLES
+// ANTI-BOMBARDMENT & LOCKOUT VARIABLES
 unsigned long lastTelegramUploadTime = 0;
-const unsigned long telegramCooldown = 15000; // 🛑 Force minimum 15 seconds between alerts
+const unsigned long telegramCooldown = 15000; // 🛑 Minimum 15s between uploads
 int lastDetectedID = -1;
-bool isWaitingForClear = false; // 🛑 Force user to remove hand before a new type fires
+bool isWaitingForClear = false;
+
+// SERIAL HEARTBEAT VARIABLE
+unsigned long lastHeartbeatTime = 0;
 
 void sendTelegramJpgFile(const String& base64Str, const String& gestureName);
 
@@ -35,7 +38,7 @@ void setup() {
     while(!Serial);
     
     Serial.println("\n================================================");
-    Serial.println("[🤖 ANTI-SPAM TELEGRAM] Initializing Core...");
+    Serial.println("[🤖 SERIAL HEARTBEAT BOT] Initializing Core...");
     Serial.println("================================================");
 
     WiFi.begin(ssid, password);
@@ -53,11 +56,24 @@ void setup() {
         Serial.println("[❌ ERROR] Camera board not found over I2C.");
         while (1) { delay(1000); }
     }
-    Serial.println("[SUCCESS] Anti-spam rules active. Waiting for gesture...");
+    Serial.println("[SUCCESS] Heartbeat system armed. Ready for gestures.");
 }
 
 void loop() {
     unsigned long currentMillis = millis();
+
+    // THE SERIAL HEARTBEAT: Prints a dot every 3 seconds when idle
+    if (currentMillis - lastHeartbeatTime >= 3000) {
+        lastHeartbeatTime = currentMillis;
+        Serial.print("."); 
+    }
+
+    // WATCHDOG RESET: If the interlock flag stays stuck for > 15s, force-release it
+    if (isWaitingForClear && (currentMillis - lastTelegramUploadTime >= telegramCooldown)) {
+        Serial.println("\n[⚠️ WATCHDOG] Lock state exceeded cooldown. Force-releasing interlock.");
+        isWaitingForClear = false;
+        lastDetectedID = -1;
+    }
 
     if (currentMillis - lastCheckTime >= checkInterval) {
         lastCheckTime = currentMillis;
@@ -66,23 +82,21 @@ void loop() {
         int status = AI.invoke(1, false, false);
 
         if (status >= 0 && AI.boxes().size() > 0) {
-            // 🌟 THE ARRAYS FIX: Corrected indices using [0] to satisfy std::vector constraints
+            // 🌟 THE ARRAYS FIX: Access vector index position 0 elements explicitly
             int currentID = AI.boxes()[0].target;
             int confidence = AI.boxes()[0].score;
 
             if (confidence > 65) {
-                // If we are currently locked waiting for the user to clear their hand, ignore this frame
+                // If locked waiting for a hand clear, bypass data capturing logic
                 if (isWaitingForClear) {
                     return; 
                 }
 
-                // Check 1: Must be a new unique gesture transition
-                // Check 2: Time elapsed must exceed the 15-second strict cooldown window
+                // Check both state changes and the mandatory time window layout
                 if (currentID != lastDetectedID && (currentMillis - lastTelegramUploadTime >= telegramCooldown)) {
-                    
                     lastDetectedID = currentID;
                     lastTelegramUploadTime = currentMillis; 
-                    isWaitingForClear = true; // 🛑 LOCK: Don't allow anything else until hand leaves
+                    isWaitingForClear = true; 
 
                     String gestureName = "";
                     if (currentID == 0) gestureName = "PAPER";
@@ -90,9 +104,8 @@ void loop() {
                     else if (currentID == 2) gestureName = "SCISSORS";
 
                     Serial.println("\n------------------------------------------------");
-                    Serial.println("[ALERT DETECTED] New " + gestureName + " event. Processing capture...");
+                    Serial.println("[EVENT] " + gestureName + " Detected! Capturing image...");
 
-                    // Force package creation call to generate the Base64 image payload bytes
                     AI.invoke(1, false, true);
                     String rawBase64 = AI.last_image();
 
@@ -100,16 +113,16 @@ void loop() {
                         sendTelegramJpgFile(rawBase64, gestureName);
                     } else {
                         Serial.println(" ➔ [⚠️ WARNING] Image payload returned empty.");
-                        isWaitingForClear = false; // Release lock if it failed
+                        isWaitingForClear = false; 
                     }
                 }
             }
         } else {
             // Hand was removed completely from the frame, reset our tracker states safely
             if (lastDetectedID != -1 || isWaitingForClear) {
-                Serial.println("\n[-] Hand cleared. Resetting anti-spam triggers.");
+                Serial.println("\n[-] Hand cleared. Resetting triggers.");
                 lastDetectedID = -1;
-                isWaitingForClear = false; // 🔓 UNLOCK: The system is ready to detect again
+                isWaitingForClear = false; 
             }
         }
     }
@@ -118,10 +131,13 @@ void loop() {
 void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
     WiFiClientSecure client;
     client.setInsecure(); 
+    
+    // THE NETWORK FIXED GATEWAY: Drop connections that stall for more than 5s
+    client.setTimeout(5); 
 
     if (!client.connect("api.telegram.org", 443)) {
-        Serial.println("[❌ NETWORK ERROR] Failed to connect to api.telegram.org");
-        isWaitingForClear = false; // Release the lock so we don't freeze forever on network failure
+        Serial.println("[❌ NETWORK ERROR] Connection to Telegram failed.");
+        isWaitingForClear = false; 
         return;
     }
 
@@ -130,6 +146,7 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
 
     if (decodeStatus != 0) {
         Serial.println("[❌ CODEC ERROR] Decoding failed.");
+        isWaitingForClear = false;
         client.stop();
         return;
     }
@@ -156,6 +173,7 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
     client.write(staticBinaryBuffer, actualBinaryLen);
     client.print(footerText);
 
-    Serial.println("[🚀 TELEGRAM] Document uploaded successfully using static buffer limits.");
+    Serial.println("[🚀 TELEGRAM] Document uploaded successfully.");
     client.stop();
+    isWaitingForClear = false;
 }

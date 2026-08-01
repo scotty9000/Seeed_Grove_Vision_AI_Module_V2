@@ -36,6 +36,7 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName);
 void setup() {
     Serial.begin(115200);
     
+<<<<<<< HEAD
     // 🌟 THE HEADLESS FIX: Replaced 'while(!Serial);' with a non-blocking timeout window.
     // Gives a computer 3 seconds to link up. If no PC is found, it continues booting automatically!
     unsigned long startWindow = millis();
@@ -47,6 +48,17 @@ void setup() {
         Serial.println("\n================================================");
         Serial.println("[🔋 STANDALONE PRODUCTION] Booting Staggered Rails...");
         Serial.println("================================================");
+=======
+    Serial.println("\n================================================");
+    Serial.println("[🤖 SERIAL HEARTBEAT BOT] Initializing Core...");
+    Serial.println("================================================");
+
+    WiFi.begin(ssid, password);
+    Serial.print("Connecting to Wi-Fi");
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+>>>>>>> 2db8c68c4b1620ea8f9a5a7ba76086bbbe17af64
     }
 
     // Initialize I2C layers first
@@ -57,6 +69,7 @@ void setup() {
         if (Serial) Serial.println("[❌ ERROR] Camera board not found over I2C.");
         while (1) { delay(1000); }
     }
+<<<<<<< HEAD
     if (Serial) Serial.println("[SUCCESS] Camera board online over I2C.");
     delay(2000); // Allow electrical rails to settle before radio power-up
 
@@ -86,20 +99,32 @@ void setup() {
         Serial.print("IP Address: ");
         Serial.println(WiFi.localIP());
     }
+=======
+    Serial.println("[SUCCESS] Heartbeat system armed. Ready for gestures.");
+>>>>>>> 2db8c68c4b1620ea8f9a5a7ba76086bbbe17af64
 }
 
 void loop() {
     unsigned long currentMillis = millis();
 
+<<<<<<< HEAD
     // Heartbeat indicator over Serial (only outputs if a terminal is listening)
     if (Serial && (currentMillis - lastHeartbeatTime >= 3000)) {
+=======
+    // THE SERIAL HEARTBEAT: Prints a dot every 3 seconds when idle
+    if (currentMillis - lastHeartbeatTime >= 3000) {
+>>>>>>> 2db8c68c4b1620ea8f9a5a7ba76086bbbe17af64
         lastHeartbeatTime = currentMillis;
         Serial.print("."); 
     }
 
     // WATCHDOG RESET: If the interlock flag stays stuck for > 15s, force-release it
     if (isWaitingForClear && (currentMillis - lastTelegramUploadTime >= telegramCooldown)) {
+<<<<<<< HEAD
         if (Serial) Serial.println("\n[⚠️ WATCHDOG] Force-releasing lock state.");
+=======
+        Serial.println("\n[⚠️ WATCHDOG] Lock state exceeded cooldown. Force-releasing interlock.");
+>>>>>>> 2db8c68c4b1620ea8f9a5a7ba76086bbbe17af64
         isWaitingForClear = false;
         lastDetectedID = -1;
     }
@@ -132,10 +157,15 @@ void loop() {
                     else if (currentID == 1) gestureName = "ROCK";
                     else if (currentID == 2) gestureName = "SCISSORS";
 
+<<<<<<< HEAD
                     if (Serial) {
                         Serial.println("\n------------------------------------------------");
                         Serial.println("[EVENT] " + gestureName + " Detected! Capturing image...");
                     }
+=======
+                    Serial.println("\n------------------------------------------------");
+                    Serial.println("[EVENT] " + gestureName + " Detected! Capturing image...");
+>>>>>>> 2db8c68c4b1620ea8f9a5a7ba76086bbbe17af64
 
                     AI.invoke(1, false, true);
                     String rawBase64 = AI.last_image();
@@ -143,7 +173,11 @@ void loop() {
                     if (rawBase64.length() > 0) {
                         sendTelegramJpgFile(rawBase64, gestureName);
                     } else {
+<<<<<<< HEAD
                         if (Serial) Serial.println(" ➔ [⚠️ WARNING] Image payload returned empty.");
+=======
+                        Serial.println(" ➔ [⚠️ WARNING] Image payload returned empty.");
+>>>>>>> 2db8c68c4b1620ea8f9a5a7ba76086bbbe17af64
                         isWaitingForClear = false; 
                     }
                 }
@@ -151,7 +185,11 @@ void loop() {
         } else {
             // Hand was removed completely from the frame, reset our tracker states safely
             if (lastDetectedID != -1 || isWaitingForClear) {
+<<<<<<< HEAD
                 if (Serial) Serial.println("\n[-] Hand cleared. Resetting triggers.");
+=======
+                Serial.println("\n[-] Hand cleared. Resetting triggers.");
+>>>>>>> 2db8c68c4b1620ea8f9a5a7ba76086bbbe17af64
                 lastDetectedID = -1;
                 isWaitingForClear = false; 
             }
@@ -167,7 +205,11 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
     client.setTimeout(5); 
 
     if (!client.connect("api.telegram.org", 443)) {
+<<<<<<< HEAD
         if (Serial) Serial.println("[❌ NETWORK ERROR] Connection to Telegram failed.");
+=======
+        Serial.println("[❌ NETWORK ERROR] Connection to Telegram failed.");
+>>>>>>> 2db8c68c4b1620ea8f9a5a7ba76086bbbe17af64
         isWaitingForClear = false; 
         return;
     }
@@ -176,7 +218,11 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
     int decodeStatus = mbedtls_base64_decode(staticBinaryBuffer, STATIC_BUFFER_SIZE, &actualBinaryLen, (const unsigned char*)base64Str.c_str(), base64Str.length());
 
     if (decodeStatus != 0) {
+<<<<<<< HEAD
         if (Serial) Serial.println("[❌ CODEC ERROR] Decoding failed.");
+=======
+        Serial.println("[❌ CODEC ERROR] Decoding failed.");
+>>>>>>> 2db8c68c4b1620ea8f9a5a7ba76086bbbe17af64
         isWaitingForClear = false;
         client.stop();
         return;
@@ -204,7 +250,11 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
     client.write(staticBinaryBuffer, actualBinaryLen);
     client.print(footerText);
 
+<<<<<<< HEAD
     if (Serial) Serial.println("[🚀 TELEGRAM] Document uploaded successfully.");
+=======
+    Serial.println("[🚀 TELEGRAM] Document uploaded successfully.");
+>>>>>>> 2db8c68c4b1620ea8f9a5a7ba76086bbbe17af64
     client.stop();
 
     // 🌟 STATE RESET EMBEDDED: Fixes the 15-second watchdog lag bug instantly

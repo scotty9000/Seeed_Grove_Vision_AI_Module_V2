@@ -35,42 +35,71 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName);
 
 void setup() {
     Serial.begin(115200);
-    while(!Serial);
     
-    Serial.println("\n================================================");
-    Serial.println("[🤖 SERIAL HEARTBEAT BOT] Initializing Core...");
-    Serial.println("================================================");
-
-    WiFi.begin(ssid, password);
-    Serial.print("Connecting to Wi-Fi");
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
+    // 🌟 THE HEADLESS FIX: Replaced 'while(!Serial);' with a non-blocking timeout window.
+    // Gives a computer 3 seconds to link up. If no PC is found, it continues booting automatically!
+    unsigned long startWindow = millis();
+    while (!Serial && (millis() - startWindow < 3000)) {
+        delay(10);
     }
-    Serial.println("\n[CONNECTED] IP Address: " + WiFi.localIP().toString());
+    
+    if (Serial) {
+        Serial.println("\n================================================");
+        Serial.println("[🔋 STANDALONE PRODUCTION] Booting Staggered Rails...");
+        Serial.println("================================================");
+    }
 
+    // Initialize I2C layers first
     Wire.begin(6, 7); 
     Wire.setClock(400000); 
     
     if (!AI.begin(&Wire)) {
-        Serial.println("[❌ ERROR] Camera board not found over I2C.");
+        if (Serial) Serial.println("[❌ ERROR] Camera board not found over I2C.");
         while (1) { delay(1000); }
     }
-    Serial.println("[SUCCESS] Heartbeat system armed. Ready for gestures.");
+    if (Serial) Serial.println("[SUCCESS] Camera board online over I2C.");
+    delay(2000); // Allow electrical rails to settle before radio power-up
+
+    // Turn on Wi-Fi cleanly 
+    WiFi.disconnect(true); 
+    delay(500);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
+    
+    int connectionTimeoutCounter = 0;
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        if (Serial) Serial.print(".");
+        connectionTimeoutCounter++;
+        
+        if (connectionTimeoutCounter > 30) { 
+            if (Serial) Serial.println("\n[⚠️ TIMEOUT] Resetting Wi-Fi adapter...");
+            WiFi.disconnect();
+            delay(1000);
+            WiFi.begin(ssid, password);
+            connectionTimeoutCounter = 0;
+        }
+    }
+    
+    if (Serial) {
+        Serial.println("\n[🎉 CONNECTED] Wi-Fi Link Established!");
+        Serial.print("IP Address: ");
+        Serial.println(WiFi.localIP());
+    }
 }
 
 void loop() {
     unsigned long currentMillis = millis();
 
-    // THE SERIAL HEARTBEAT: Prints a dot every 3 seconds when idle
-    if (currentMillis - lastHeartbeatTime >= 3000) {
+    // Heartbeat indicator over Serial (only outputs if a terminal is listening)
+    if (Serial && (currentMillis - lastHeartbeatTime >= 3000)) {
         lastHeartbeatTime = currentMillis;
         Serial.print("."); 
     }
 
     // WATCHDOG RESET: If the interlock flag stays stuck for > 15s, force-release it
     if (isWaitingForClear && (currentMillis - lastTelegramUploadTime >= telegramCooldown)) {
-        Serial.println("\n[⚠️ WATCHDOG] Lock state exceeded cooldown. Force-releasing interlock.");
+        if (Serial) Serial.println("\n[⚠️ WATCHDOG] Force-releasing lock state.");
         isWaitingForClear = false;
         lastDetectedID = -1;
     }
@@ -103,8 +132,10 @@ void loop() {
                     else if (currentID == 1) gestureName = "ROCK";
                     else if (currentID == 2) gestureName = "SCISSORS";
 
-                    Serial.println("\n------------------------------------------------");
-                    Serial.println("[EVENT] " + gestureName + " Detected! Capturing image...");
+                    if (Serial) {
+                        Serial.println("\n------------------------------------------------");
+                        Serial.println("[EVENT] " + gestureName + " Detected! Capturing image...");
+                    }
 
                     AI.invoke(1, false, true);
                     String rawBase64 = AI.last_image();
@@ -112,7 +143,7 @@ void loop() {
                     if (rawBase64.length() > 0) {
                         sendTelegramJpgFile(rawBase64, gestureName);
                     } else {
-                        Serial.println(" ➔ [⚠️ WARNING] Image payload returned empty.");
+                        if (Serial) Serial.println(" ➔ [⚠️ WARNING] Image payload returned empty.");
                         isWaitingForClear = false; 
                     }
                 }
@@ -120,7 +151,7 @@ void loop() {
         } else {
             // Hand was removed completely from the frame, reset our tracker states safely
             if (lastDetectedID != -1 || isWaitingForClear) {
-                Serial.println("\n[-] Hand cleared. Resetting triggers.");
+                if (Serial) Serial.println("\n[-] Hand cleared. Resetting triggers.");
                 lastDetectedID = -1;
                 isWaitingForClear = false; 
             }
@@ -136,7 +167,7 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
     client.setTimeout(5); 
 
     if (!client.connect("api.telegram.org", 443)) {
-        Serial.println("[❌ NETWORK ERROR] Connection to Telegram failed.");
+        if (Serial) Serial.println("[❌ NETWORK ERROR] Connection to Telegram failed.");
         isWaitingForClear = false; 
         return;
     }
@@ -145,7 +176,7 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
     int decodeStatus = mbedtls_base64_decode(staticBinaryBuffer, STATIC_BUFFER_SIZE, &actualBinaryLen, (const unsigned char*)base64Str.c_str(), base64Str.length());
 
     if (decodeStatus != 0) {
-        Serial.println("[❌ CODEC ERROR] Decoding failed.");
+        if (Serial) Serial.println("[❌ CODEC ERROR] Decoding failed.");
         isWaitingForClear = false;
         client.stop();
         return;
@@ -173,7 +204,9 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
     client.write(staticBinaryBuffer, actualBinaryLen);
     client.print(footerText);
 
-    Serial.println("[🚀 TELEGRAM] Document uploaded successfully.");
+    if (Serial) Serial.println("[🚀 TELEGRAM] Document uploaded successfully.");
     client.stop();
-    isWaitingForClear = false;
+
+    // 🌟 STATE RESET EMBEDDED: Fixes the 15-second watchdog lag bug instantly
+    isWaitingForClear = false; 
 }

@@ -61,3 +61,4 @@ tools/wio_uart_monitor/
 Thumbs.db
 
 secrets.h
+*.bak

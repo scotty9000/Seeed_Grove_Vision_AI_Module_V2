@@ -59,3 +59,5 @@ tools/wio_uart_monitor/
 # Operating system metadata files
 .DS_Store
 Thumbs.db
+
+secrets.h

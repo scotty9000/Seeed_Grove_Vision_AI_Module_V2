@@ -101,7 +101,7 @@ void loop() {
         if (Serial) {
             Serial.print("[RSSI: ");
             Serial.print(WiFi.RSSI());
-            Serial.print("dBm] ");
+            Serial.println("dBm] ");
         } else {
             Serial.print("."); 
         }

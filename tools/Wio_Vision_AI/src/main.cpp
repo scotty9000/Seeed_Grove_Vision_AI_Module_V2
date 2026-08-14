@@ -237,7 +237,6 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
     uint32_t totalPayloadLen = head.length() + estimatedBinaryLen + tail.length();
 
     // 4. MEMORY SECURITY GATE
-    // Verify the combined layout fits within our hardcoded static buffer footprint
     if (totalPayloadLen > STATIC_BUFFER_SIZE) {
         if (Serial) {
             Serial.println("\n[❌ MEMORY EXCEPTION] Composite debug buffer size exceeded!");
@@ -248,30 +247,38 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
         return; 
     }
 
-    // 5. STITCH PACKET COMPONENT RAILS INSIDE STATIC BUFFER
-    // Allocate a temporary helper array to decode the raw JPEG data first
-    unsigned char tempJpgBuffer[STATIC_BUFFER_SIZE]; // Temporary buffer for decoded JPEG data
+    // 5. STITCH PACKET COMPONENT RAILS INSIDE STATIC GLOBAL BUFFER
+    // Copy Step A: Populate the text headers into the beginning of the static buffer first
+    memcpy(staticBinaryBuffer, head.c_str(), head.length());
+    
+    // Copy Step B: Direct Injection. Decode Base64 straight into global memory right after the header text
     size_t actualBinaryLen = 0;
-    int decodeStatus = mbedtls_base64_decode(tempJpgBuffer, sizeof(tempJpgBuffer), &actualBinaryLen, (const unsigned char*)base64Str.c_str(), base64Str.length());
+    int decodeStatus = mbedtls_base64_decode(
+        staticBinaryBuffer + head.length(),              // Destination memory address offset
+        STATIC_BUFFER_SIZE - head.length(),              // Remaining safe allocation space
+        &actualBinaryLen, 
+        (const unsigned char*)base64Str.c_str(), 
+        base64Str.length()
+    );
 
     if (decodeStatus != 0) {
-        if (Serial) Serial.println("[❌ CODEC ERROR] Base64 image decode failed.");
+        if (Serial) {
+            Serial.print("[❌ CODEC ERROR] Base64 image decode failed. Status: ");
+            Serial.println(decodeStatus);
+        }
         return;
     }
 
     // Recalculate strict final length after exact decoding
     totalPayloadLen = head.length() + actualBinaryLen + tail.length();
-    Serial.print(" totalPayloadLen: "); Serial.print(totalPayloadLen); Serial.println(" bytes.");
-
-    // Copy Step A: Populate the text headers into the beginning of the static buffer
-    memcpy(staticBinaryBuffer, head.c_str(), head.length());
+    if (Serial) {
+        Serial.print(" totalPayloadLen: "); 
+        Serial.print(totalPayloadLen); 
+        Serial.println(" bytes.");
+    }
     
-    // Copy Step B: Append the raw decoded JPEG binary bytes right after the header text
-    memcpy(staticBinaryBuffer + head.length(), tempJpgBuffer, actualBinaryLen);
-    
-    // Copy Step C: Append the multipart footer text right after the binary payload
+    // Copy Step C: Append the multipart footer text right after the binary payload ends
     memcpy(staticBinaryBuffer + head.length() + actualBinaryLen, tail.c_str(), tail.length());
-
 
     // 6. INITIATE NETWORK TRANSPORT
     if (WiFi.status() != WL_CONNECTED) {
@@ -296,7 +303,7 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
     client.println("Connection: close");
     client.println();
 
-    // 🌟 THE INDIVISIBLE PUSH: Fire the combined string, binary, and footer in one single data block
+    // Fire the combined string, binary, and footer in one single data block
     client.write(staticBinaryBuffer, totalPayloadLen);
 
     if (Serial) Serial.println("[✔ SUCCESS] Combined data payload pushed out via Wi-Fi stack.");

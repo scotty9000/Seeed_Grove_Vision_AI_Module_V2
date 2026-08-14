@@ -28,7 +28,7 @@ bool isLockoutActive = false;
 // TIMEOUTS AND MONITORING
 unsigned long lastHeartbeatTime = 0;
 
-void sendTelegramJpgFile(const String& base64Str, const String& gestureName);
+void sendDummyTelegramJpgFile(const String& base64Str, const String& gestureName);
 
 void setup() {
     Serial.begin(115200);
@@ -109,8 +109,8 @@ void loop() {
     if (currentMillis - lastCheckTime >= checkInterval) {
         lastCheckTime = currentMillis;
 
-        // Run AI evaluation pass (Light metadata pass)
-        int status = AI.invoke(1, true, false);
+        // Run AI evaluation pass
+        int status = AI.invoke(1, false, true);
 
         if (status < 0) {
             Serial.print("\n[❌ I2C ERROR] Camera bus read failed. Status: ");
@@ -125,25 +125,25 @@ void loop() {
 
             if (confidence > 60) {
                 
-                // 🛑 CASE 1: MATCH FOUND BUT LOCKOUT IS ACTIVE (Prints a down-counter)
-                if (isLockoutActive) {
-                    unsigned long timeElapsed = currentMillis - lockoutTimerStart;
-                    unsigned long timeRemaining = (timeElapsed < ANTI_FLOOD_INTERVAL) ? (ANTI_FLOOD_INTERVAL - timeElapsed) : 0;
-                    float remainingSeconds = timeRemaining / 1000.0;
+                // // 🛑 CASE 1: MATCH FOUND BUT LOCKOUT IS ACTIVE (Prints a down-counter)
+                // if (isLockoutActive) {
+                //     unsigned long timeElapsed = currentMillis - lockoutTimerStart;
+                //     unsigned long timeRemaining = (timeElapsed < ANTI_FLOOD_INTERVAL) ? (ANTI_FLOOD_INTERVAL - timeElapsed) : 0;
+                //     float remainingSeconds = timeRemaining / 1000.0;
 
-                    Serial.println("\n------------------------------------------------");
-                    Serial.print("[🛑 LOCKOUT ACTIVE] Target ID: "); Serial.print(currentID);
-                    Serial.print(" (Conf: "); Serial.print(confidence); Serial.println("%) ignored.");
-                    Serial.print(" ➔ Next upload available in: ");
-                    Serial.print(remainingSeconds, 1);
-                    Serial.println(" seconds.");
-                    Serial.println("------------------------------------------------");
-                    return; 
-                }
+                //     Serial.println("\n------------------------------------------------");
+                //     Serial.print("[🛑 LOCKOUT ACTIVE] Target ID: "); Serial.print(currentID);
+                //     Serial.print(" (Conf: "); Serial.print(confidence); Serial.println("%) ignored.");
+                //     Serial.print(" ➔ Next upload available in: ");
+                //     Serial.print(remainingSeconds, 1);
+                //     Serial.println(" seconds.");
+                //     Serial.println("------------------------------------------------");
+                //     return; 
+                // }
 
-                // 🚀 CASE 2: MATCH FOUND AND SYSTEM IS READY (No longer cares if it's the same gesture!)
-                lockoutTimerStart = currentMillis; 
-                isLockoutActive = true; 
+                // // 🚀 CASE 2: MATCH FOUND AND SYSTEM IS READY (No longer cares if it's the same gesture!)
+                // lockoutTimerStart = currentMillis; 
+                // isLockoutActive = true; 
 
                 String gestureName = "";
                 if (currentID == 0) gestureName = "PAPER";
@@ -156,67 +156,90 @@ void loop() {
                 Serial.println("\n================================================");
 
                 // Pull the actual image payload now that the trigger is validated
-                AI.invoke(1, false, true);
+                //AI.invoke(0, false, true);
                 String rawBase64 = AI.last_image();
 
                 // Forward to your dummy network function
-                sendTelegramJpgFile(rawBase64, gestureName); 
+                sendDummyTelegramJpgFile(rawBase64, gestureName); 
+                AI.invoke(1, true, false); // stop retriggering pathology
             }
         }
     }
 }
 
 
-// void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
-//     // Check local Wi-Fi state before initiating a network call
-//     if (WiFi.status() != WL_CONNECTED) {
-//         if (Serial) Serial.println("[❌ OFFLINE] Wi-Fi link dropped. Aborting upload.");
-//         return;
-//     }
+void sendDummyTelegramJpgFile(const String& base64Str, const String& gestureName) {
+    // 1. PRE-FLIGHT BOUNDS CALCULATION
+    size_t estimatedBinaryLen = (base64Str.length() * 3) / 4;
 
-//     WiFiClientSecure client;
-//     client.setInsecure(); 
-//     client.setTimeout(8); // Increased slightly to accommodate slower garden transmission rails
+    // 2. CONSTRUCT MULTIPART TEXT HEAD AND TAIL
+    String boundary = "----ESP32C3Boundary";
+    String head = "--" + boundary + "\r\n" +
+                  "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n" + chatID + "\r\n" +
+                  "--" + boundary + "\r\n" +
+                  "Content-Disposition: form-data; name=\"caption\"\r\n\r\nMatch: " + gestureName + " (RSSI: " + String(WiFi.RSSI()) + "dBm)\r\n" +
+                  "--" + boundary + "\r\n" +
+                  "Content-Disposition: form-data; name=\"photo\"; filename=\"capture.jpg\"\r\n" +
+                  "Content-Type: image/jpeg\r\n\r\n";
+    String tail = "\r\n--" + boundary + "--\r\n";
 
-//     if (!client.connect("api.telegram.org", 443)) {
-//         if (Serial) Serial.println("[❌ NETWORK ERROR] Connection to Telegram endpoint failed.");
-//         return;
-//     }
+    // 3. CALCULATE EXACT COMPOSITE TOTAL LENGTH
+    uint32_t totalPayloadLen = head.length() + estimatedBinaryLen + tail.length();
 
-//     size_t actualBinaryLen = 0;
-//     int decodeStatus = mbedtls_base64_decode(staticBinaryBuffer, STATIC_BUFFER_SIZE, &actualBinaryLen, (const unsigned char*)base64Str.c_str(), base64Str.length());
+    // 4. MEMORY SECURITY GATE
+    if (totalPayloadLen > STATIC_BUFFER_SIZE) {
+        if (Serial) {
+            Serial.println("\n[MEMORY EXCEPTION] Composite debug buffer size exceeded!");
+            Serial.print(" -> Required Buffer Size: "); Serial.print(totalPayloadLen); Serial.println(" bytes.");
+            Serial.print(" -> Static Buffer Limit:  "); Serial.print(STATIC_BUFFER_SIZE); Serial.println(" bytes.");
+            Serial.println(" -> Aborting simulation to prevent memory corruption.");
+        }
+        return; 
+    }
 
-//     if (decodeStatus != 0) {
-//         if (Serial) Serial.println("[❌ CODEC ERROR] Base64 image stream decode failed.");
-//         return;
-//     }
+    // 5. STITCH PACKET COMPONENT RAILS INSIDE STATIC GLOBAL BUFFER
+    //memcpy(staticBinaryBuffer, head.c_str(), head.length());
+    
+    size_t actualBinaryLen = 0;
+    int decodeStatus = mbedtls_base64_decode(
+        staticBinaryBuffer + head.length(),              
+        STATIC_BUFFER_SIZE - head.length(),              
+        &actualBinaryLen, 
+        (const unsigned char*)base64Str.c_str(), 
+        base64Str.length()
+    );
 
-//     // TELEGRAM HTTP MULTIPART POST MANIFEST PIPELINE
-//     String boundary = "----ESP32C3Boundary";
-//     String head = "--" + boundary + "\r\n" +
-//                   "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n" + chatID + "\r\n" +
-//                   "--" + boundary + "\r\n" +
-//                   "Content-Disposition: form-data; name=\"caption\"\r\n\r\nMatch: " + gestureName + " (RSSI: " + String(WiFi.RSSI()) + "dBm)\r\n" +
-//                   "--" + boundary + "\r\n" +
-//                   "Content-Disposition: form-data; name=\"photo\"; filename=\"capture.jpg\"\r\n" +
-//                   "Content-Type: image/jpeg\r\n\r\n";
-//     String tail = "\r\n--" + boundary + "--\r\n";
+    if (decodeStatus != 0) {
+        if (Serial) {
+            Serial.print("[CODEC ERROR] Base64 image decode failed. Status: ");
+            Serial.println(decodeStatus);
+        }
+        return;
+    }
 
-//     uint32_t totalLen = head.length() + actualBinaryLen + tail.length();
+    // Recalculate final precise payload window
+    totalPayloadLen = head.length() + actualBinaryLen + tail.length();
+    
+    //memcpy(staticBinaryBuffer + head.length() + actualBinaryLen, tail.c_str(), tail.length());
 
-//     client.println("POST /bot" + botToken + "/sendPhoto HTTP/1.1");
-//     client.println("Host: api.telegram.org");
-//     client.println("Content-Length: " + String(totalLen));
-//     client.println("Content-Type: multipart/form-data; boundary=" + boundary);
-//     client.println("Connection: close");
-//     client.println();
+    // 6. SIMULATE LOCAL NETWORK TRANSMISSION
+    if (Serial) {
+        Serial.println("====================================================");
+        Serial.print("[DUMMY NETWORK] Simulating Telegram Upload for: ");
+        Serial.println(gestureName);
+        Serial.print("[DUMMY NETWORK] Raw base64Str length: ");
+        Serial.print(base64Str.length());
+        Serial.println(" characters.");
+        Serial.print("[DUMMY NETWORK] Total Consolidated Payload Size: ");
+        Serial.print(totalPayloadLen);
+        Serial.println(" bytes.");
+        Serial.print("[DUMMY NETWORK] Active Hotspot Connection Strength: ");
+        Serial.print(WiFi.RSSI());
+        Serial.println(" dBm");
+        Serial.println("====================================================");
+    }
+}
 
-//     client.print(head);
-//     client.write(staticBinaryBuffer, actualBinaryLen);
-//     client.print(tail);
-
-//     if (Serial) Serial.println("[✔ SUCCESS] Data payload pushed out via Wi-Fi stack.");
-// }
 
 void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
     // 1. PRE-FLIGHT BOUNDS CALCULATION

@@ -28,7 +28,9 @@ bool isLockoutActive = false;
 // TIMEOUTS AND MONITORING
 unsigned long lastHeartbeatTime = 0;
 
-void sendDummyTelegramJpgFile(const String& base64Str, const String& gestureName);
+void sendTelegramJpgFile(const String& base64Str, const String& gestureName);
+uint32_t assembleMultipartBuffer(const String& base64Str, const String& gestureName, const String& boundary);
+
 
 void setup() {
     Serial.begin(115200);
@@ -149,8 +151,8 @@ void loop() {
                 // Pull the actual image payload now that the trigger is validated
                 String rawBase64 = AI.last_image();
 
-                // Forward to your dummy network function
-                sendDummyTelegramJpgFile(rawBase64, gestureName); 
+                // Forward to your network function
+                sendTelegramJpgFile(rawBase64, gestureName); 
                 
                 // Clear hardware registers to completely resolve retrigger loops
                 AI.invoke(1, true, false); 
@@ -161,84 +163,22 @@ void loop() {
 
 
 void sendDummyTelegramJpgFile(const String& base64Str, const String& gestureName) {
-    // 1. PRE-FLIGHT BOUNDS CALCULATION
-    size_t estimatedBinaryLen = (base64Str.length() * 3) / 4;
-
-    // 2. CONSTRUCT MULTIPART TEXT HEAD AND TAIL
     String boundary = "----ESP32C3Boundary";
-    String head = "--" + boundary + "\r\n" +
-                  "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n" + chatID + "\r\n" +
-                  "--" + boundary + "\r\n" +
-                  "Content-Disposition: form-data; name=\"caption\"\r\n\r\nMatch: " + gestureName + " (RSSI: " + String(WiFi.RSSI()) + "dBm)\r\n" +
-                  "--" + boundary + "\r\n" +
-                  "Content-Disposition: form-data; name=\"photo\"; filename=\"capture.jpg\"\r\n" +
-                  "Content-Type: image/jpeg\r\n\r\n";
-    String tail = "\r\n--" + boundary + "--\r\n";
 
-    // 3. CALCULATE EXACT COMPOSITE TOTAL LENGTH
-    uint32_t totalPayloadLen = head.length() + estimatedBinaryLen + tail.length();
+    // 🌟 EXECUTE ABSTRACTED BUFFER ASSEMBLY
+    uint32_t totalPayloadLen = assembleMultipartBuffer(base64Str, gestureName, boundary);
 
-    // 4. MEMORY SECURITY GATE
-    if (totalPayloadLen > STATIC_BUFFER_SIZE) {
-        if (Serial) {
-            Serial.println("\n[MEMORY EXCEPTION] Composite debug buffer size exceeded!");
-            Serial.print(" -> Required Buffer Size: "); Serial.print(totalPayloadLen); Serial.println(" bytes.");
-            Serial.print(" -> Static Buffer Limit:  "); Serial.print(STATIC_BUFFER_SIZE); Serial.println(" bytes.");
-            Serial.println(" -> Aborting simulation to prevent memory corruption.");
-        }
-        return; 
-    }
-
-    // 5. STITCH PACKET COMPONENT RAILS INSIDE STATIC GLOBAL BUFFER
-    // Step A: Decode Base64 straight into index 0 of global memory to guarantee 4-byte alignment
-    size_t actualBinaryLen = 0;
-    int decodeStatus = mbedtls_base64_decode(
-        staticBinaryBuffer,              // Always decode to base pointer position 0
-        STATIC_BUFFER_SIZE,              
-        &actualBinaryLen, 
-        (const unsigned char*)base64Str.c_str(), 
-        base64Str.length()
-    );
-
-    if (decodeStatus != 0) {
-        if (Serial) {
-            Serial.print("[CODEC ERROR] Base64 image decode failed. Status: ");
-            Serial.println(decodeStatus);
-        }
+    // If the helper function encountered an error or memory exception, it returns 0
+    if (totalPayloadLen == 0) {
+        if (Serial) Serial.println("[⚠️ SIMULATION] Aborting due to buffer assembly failure.");
         return;
     }
-
-    // Recalculate strict final length after exact decoding
-    totalPayloadLen = head.length() + actualBinaryLen + tail.length();
-    if (Serial) {
-        Serial.print(" totalPayloadLen: "); 
-        Serial.print(totalPayloadLen); 
-        Serial.println(" bytes.");
-    }
-    
-    // Step B: Shift the raw binary data down the buffer to make room for the text header
-    memmove(staticBinaryBuffer + head.length(), staticBinaryBuffer, actualBinaryLen);
-
-    // Step C: Copy the text header cleanly into the newly opened front slot
-    memcpy(staticBinaryBuffer, head.c_str(), head.length());
-    
-    // Step D: Append the multipart footer text right after the shifted binary payload ends
-    memcpy(staticBinaryBuffer + head.length() + actualBinaryLen, tail.c_str(), tail.length());
-
-
-    // Recalculate final precise payload window
-    totalPayloadLen = head.length() + actualBinaryLen + tail.length();
-    
-    //memcpy(staticBinaryBuffer + head.length() + actualBinaryLen, tail.c_str(), tail.length());
 
     // 6. SIMULATE LOCAL NETWORK TRANSMISSION
     if (Serial) {
         Serial.println("====================================================");
         Serial.print("[DUMMY NETWORK] Simulating Telegram Upload for: ");
         Serial.println(gestureName);
-        Serial.print("[DUMMY NETWORK] Raw base64Str length: ");
-        Serial.print(base64Str.length());
-        Serial.println(" characters.");
         Serial.print("[DUMMY NETWORK] Total Consolidated Payload Size: ");
         Serial.print(totalPayloadLen);
         Serial.println(" bytes.");
@@ -249,13 +189,57 @@ void sendDummyTelegramJpgFile(const String& base64Str, const String& gestureName
     }
 }
 
-
 void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
+    String boundary = "----ESP32C3Boundary";
+
+    // Call our abstracted alignment function to map out memory arrays natively
+    uint32_t totalPayloadLen = assembleMultipartBuffer(base64Str, gestureName, boundary);
+
+    if (totalPayloadLen == 0) {
+        if (Serial) Serial.println("[WARNING] Aborting network send due to buffer assembly failure.");
+        return;
+    }
+
+    // Verify local Wi-Fi state before initiating an external radio network handshake
+    if (WiFi.status() != WL_CONNECTED) {
+        if (Serial) Serial.println("[ERROR] Wi-Fi link dropped. Aborting secure upload.");
+        return;
+    }
+
+    WiFiClientSecure client;
+    client.setInsecure(); 
+    client.setTimeout(8); // Generous 8s window protects against garden network path fragmentation
+
+    if (!client.connect("api.telegram.org", 443)) {
+        if (Serial) Serial.println("[ERROR] Connection to secure Telegram gateway endpoint failed.");
+        return;
+    }
+
+    // SEND SYSTEM MANIFEST HTTP POST ROUTING HEADERS
+    client.println("POST /bot" + botToken + "/sendPhoto HTTP/1.1");
+    client.println("Host: api.telegram.org");
+    client.println("Content-Length: " + String(totalPayloadLen));
+    client.println("Content-Type: multipart/form-data; boundary=" + boundary);
+    client.println("Connection: close");
+    client.println();
+
+    // THE HIGH-SPEED INDIVISIBLE PUSH
+    // Pushes the exact total composite payload block in one solid packet over the air rails
+    client.write(staticBinaryBuffer, totalPayloadLen);
+
+    if (Serial) {
+        Serial.print("[SUCCESS] Indivisible payload package (");
+        Serial.print(totalPayloadLen);
+        Serial.println(" bytes) successfully delivered via secure radio stacks.");
+    }
+}
+
+
+uint32_t assembleMultipartBuffer(const String& base64Str, const String& gestureName, const String& boundary) {
     // 1. PRE-FLIGHT BOUNDS CALCULATION
     size_t estimatedBinaryLen = (base64Str.length() * 3) / 4;
 
-    // 2. CONSTRUCT MULTIPART TEXT HEAD AND TAIL
-    String boundary = "----ESP32C3Boundary";
+    // 2. CONSTRUCT INDIVIDUAL TEXT HEAD AND TAIL RAILS
     String head = "--" + boundary + "\r\n" +
                   "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n" + chatID + "\r\n" +
                   "--" + boundary + "\r\n" +
@@ -265,29 +249,23 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
                   "Content-Type: image/jpeg\r\n\r\n";
     String tail = "\r\n--" + boundary + "--\r\n";
 
-    // 3. CALCULATE EXACT COMPOSITE TOTAL LENGTH
+    // 3. RUN STRUCTURAL SIZE EVALUATION GATE
     uint32_t totalPayloadLen = head.length() + estimatedBinaryLen + tail.length();
 
-    // 4. MEMORY SECURITY GATE
     if (totalPayloadLen > STATIC_BUFFER_SIZE) {
         if (Serial) {
-            Serial.println("\n[❌ MEMORY EXCEPTION] Composite debug buffer size exceeded!");
+            Serial.println("\n[❌ MEMORY EXCEPTION] Composite allocation limit exceeded!");
             Serial.print(" -> Required Buffer Size: "); Serial.print(totalPayloadLen); Serial.println(" bytes.");
             Serial.print(" -> Static Buffer Limit:  "); Serial.print(STATIC_BUFFER_SIZE); Serial.println(" bytes.");
-            Serial.println(" -> Aborting network transmission to prevent system crash.");
         }
-        return; 
+        return 0; // Returns 0 as an explicit error signature to tell the caller to abort
     }
 
-    // 5. STITCH PACKET COMPONENT RAILS INSIDE STATIC GLOBAL BUFFER
-    // Copy Step A: Populate the text headers into the beginning of the static buffer first
-    memcpy(staticBinaryBuffer, head.c_str(), head.length());
-    
-    // Copy Step B: Direct Injection. Decode Base64 straight into global memory right after the header text
+    // 4. DECODE RAW BINARY DIRECTLY INTO BASE POSITION ZERO FOR STRICT 4-BYTE ALIGNMENT
     size_t actualBinaryLen = 0;
     int decodeStatus = mbedtls_base64_decode(
-        staticBinaryBuffer + head.length(),              // Destination memory address offset
-        STATIC_BUFFER_SIZE - head.length(),              // Remaining safe allocation space
+        staticBinaryBuffer,              
+        STATIC_BUFFER_SIZE,              
         &actualBinaryLen, 
         (const unsigned char*)base64Str.c_str(), 
         base64Str.length()
@@ -298,47 +276,22 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
             Serial.print("[❌ CODEC ERROR] Base64 image decode failed. Status: ");
             Serial.println(decodeStatus);
         }
-        return;
+        return 0; 
     }
 
-    // Recalculate strict final length after exact decoding
-    totalPayloadLen = head.length() + actualBinaryLen + tail.length();
-    if (Serial) {
-        Serial.print(" totalPayloadLen: "); 
-        Serial.print(totalPayloadLen); 
-        Serial.println(" bytes.");
-    }
+    // 5. STITCH PACKET COMPONENT RAILS INSIDE STATIC GLOBAL SPACE
+    // Step A: Shift the raw binary data cleanly down the buffer to carve out room for headers
+    memmove(staticBinaryBuffer + head.length(), staticBinaryBuffer, actualBinaryLen);
+
+    // Step B: Copy the text header string directly into the newly opened front slot
+    memcpy(staticBinaryBuffer, head.c_str(), head.length());
     
-    // Copy Step C: Append the multipart footer text right after the binary payload ends
+    // Step C: Append the multipart footer text right after the shifted binary payload ends
     memcpy(staticBinaryBuffer + head.length() + actualBinaryLen, tail.c_str(), tail.length());
 
-    // 6. INITIATE NETWORK TRANSPORT
-    if (WiFi.status() != WL_CONNECTED) {
-        if (Serial) Serial.println("[❌ OFFLINE] Wi-Fi link dropped. Aborting upload.");
-        return;
-    }
-
-    WiFiClientSecure client;
-    client.setInsecure(); 
-    client.setTimeout(8); 
-
-    if (!client.connect("api.telegram.org", 443)) {
-        if (Serial) Serial.println("[❌ NETWORK ERROR] Connection to Telegram endpoint failed.");
-        return;
-    }
-
-    // SEND SYSTEM MANIFEST HEADERS
-    client.println("POST /bot" + botToken + "/sendPhoto HTTP/1.1");
-    client.println("Host: api.telegram.org");
-    client.println("Content-Length: " + String(totalPayloadLen));
-    client.println("Content-Type: multipart/form-data; boundary=" + boundary);
-    client.println("Connection: close");
-    client.println();
-
-    // Fire the combined string, binary, and footer in one single data block
-    client.write(staticBinaryBuffer, totalPayloadLen);
-
-    if (Serial) Serial.println("[✔ SUCCESS] Combined data payload pushed out via Wi-Fi stack.");
+    // 6. CALCULATE AND RETURN PRECISE TOTAL COMBINED LENGTH
+    totalPayloadLen = head.length() + actualBinaryLen + tail.length();
+    return totalPayloadLen;
 }
 
 

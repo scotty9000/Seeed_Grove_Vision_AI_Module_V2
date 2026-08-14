@@ -13,7 +13,7 @@ const String botToken = SECRET_TOKEN;
 const String chatID   = SECRET_ID;
 
 // Static Buffer for Fragmentation Prevention
-#define STATIC_BUFFER_SIZE 4096
+#define STATIC_BUFFER_SIZE 8192
 unsigned char staticBinaryBuffer[STATIC_BUFFER_SIZE];
 
 SSCMA AI;
@@ -123,7 +123,7 @@ void loop() {
             int currentID = AI.boxes()[0].target;
             int confidence = AI.boxes()[0].score;
 
-            if (confidence > 45) {
+            if (confidence > 60) {
                 
                 // 🛑 CASE 1: MATCH FOUND BUT LOCKOUT IS ACTIVE (Prints a down-counter)
                 if (isLockoutActive) {
@@ -171,7 +171,6 @@ void loop() {
 //     // Check local Wi-Fi state before initiating a network call
 //     if (WiFi.status() != WL_CONNECTED) {
 //         if (Serial) Serial.println("[❌ OFFLINE] Wi-Fi link dropped. Aborting upload.");
-//         isWaitingForClear = false;
 //         return;
 //     }
 
@@ -181,7 +180,6 @@ void loop() {
 
 //     if (!client.connect("api.telegram.org", 443)) {
 //         if (Serial) Serial.println("[❌ NETWORK ERROR] Connection to Telegram endpoint failed.");
-//         isWaitingForClear = false; 
 //         return;
 //     }
 
@@ -190,7 +188,6 @@ void loop() {
 
 //     if (decodeStatus != 0) {
 //         if (Serial) Serial.println("[❌ CODEC ERROR] Base64 image stream decode failed.");
-//         isWaitingForClear = false;
 //         return;
 //     }
 
@@ -222,20 +219,87 @@ void loop() {
 // }
 
 void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
-    // 🧪 LOCAL TEST DUMMY: No Wi-Fi or Telegram transmission occurs here
-    if (Serial) {
-        Serial.println("====================================================");
-        Serial.print("🌐 [DUMMY NETWORK] Simulating Telegram Upload for: ");
-        Serial.println(gestureName);
-        Serial.print("📷 [DUMMY NETWORK] Base64 Image Size: ");
-        Serial.print(base64Str.length());
-        Serial.println(" bytes.");
-        Serial.print("📡 [DUMMY NETWORK] Active Hotspot Connection Strength: ");
-        Serial.print(WiFi.RSSI());
-        Serial.println(" dBm");
-        Serial.println("====================================================");
+    // 1. PRE-FLIGHT BOUNDS CALCULATION
+    size_t estimatedBinaryLen = (base64Str.length() * 3) / 4;
+
+    // 2. CONSTRUCT MULTIPART TEXT HEAD AND TAIL
+    String boundary = "----ESP32C3Boundary";
+    String head = "--" + boundary + "\r\n" +
+                  "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n" + chatID + "\r\n" +
+                  "--" + boundary + "\r\n" +
+                  "Content-Disposition: form-data; name=\"caption\"\r\n\r\nMatch: " + gestureName + " (RSSI: " + String(WiFi.RSSI()) + "dBm)\r\n" +
+                  "--" + boundary + "\r\n" +
+                  "Content-Disposition: form-data; name=\"photo\"; filename=\"capture.jpg\"\r\n" +
+                  "Content-Type: image/jpeg\r\n\r\n";
+    String tail = "\r\n--" + boundary + "--\r\n";
+
+    // 3. CALCULATE EXACT COMPOSITE TOTAL LENGTH
+    uint32_t totalPayloadLen = head.length() + estimatedBinaryLen + tail.length();
+
+    // 4. MEMORY SECURITY GATE
+    // Verify the combined layout fits within our hardcoded static buffer footprint
+    if (totalPayloadLen > STATIC_BUFFER_SIZE) {
+        if (Serial) {
+            Serial.println("\n[❌ MEMORY EXCEPTION] Composite debug buffer size exceeded!");
+            Serial.print(" -> Required Buffer Size: "); Serial.print(totalPayloadLen); Serial.println(" bytes.");
+            Serial.print(" -> Static Buffer Limit:  "); Serial.print(STATIC_BUFFER_SIZE); Serial.println(" bytes.");
+            Serial.println(" -> Aborting network transmission to prevent system crash.");
+        }
+        return; 
     }
+
+    // 5. STITCH PACKET COMPONENT RAILS INSIDE STATIC BUFFER
+    // Allocate a temporary helper array to decode the raw JPEG data first
+    unsigned char tempJpgBuffer[STATIC_BUFFER_SIZE]; // Temporary buffer for decoded JPEG data
+    size_t actualBinaryLen = 0;
+    int decodeStatus = mbedtls_base64_decode(tempJpgBuffer, sizeof(tempJpgBuffer), &actualBinaryLen, (const unsigned char*)base64Str.c_str(), base64Str.length());
+
+    if (decodeStatus != 0) {
+        if (Serial) Serial.println("[❌ CODEC ERROR] Base64 image decode failed.");
+        return;
+    }
+
+    // Recalculate strict final length after exact decoding
+    totalPayloadLen = head.length() + actualBinaryLen + tail.length();
+    Serial.print(" totalPayloadLen: "); Serial.print(totalPayloadLen); Serial.println(" bytes.");
+
+    // Copy Step A: Populate the text headers into the beginning of the static buffer
+    memcpy(staticBinaryBuffer, head.c_str(), head.length());
     
-    // The state machine will safely think the transmission succeeded
+    // Copy Step B: Append the raw decoded JPEG binary bytes right after the header text
+    memcpy(staticBinaryBuffer + head.length(), tempJpgBuffer, actualBinaryLen);
+    
+    // Copy Step C: Append the multipart footer text right after the binary payload
+    memcpy(staticBinaryBuffer + head.length() + actualBinaryLen, tail.c_str(), tail.length());
+
+
+    // 6. INITIATE NETWORK TRANSPORT
+    if (WiFi.status() != WL_CONNECTED) {
+        if (Serial) Serial.println("[❌ OFFLINE] Wi-Fi link dropped. Aborting upload.");
+        return;
+    }
+
+    WiFiClientSecure client;
+    client.setInsecure(); 
+    client.setTimeout(8); 
+
+    if (!client.connect("api.telegram.org", 443)) {
+        if (Serial) Serial.println("[❌ NETWORK ERROR] Connection to Telegram endpoint failed.");
+        return;
+    }
+
+    // SEND SYSTEM MANIFEST HEADERS
+    client.println("POST /bot" + botToken + "/sendPhoto HTTP/1.1");
+    client.println("Host: api.telegram.org");
+    client.println("Content-Length: " + String(totalPayloadLen));
+    client.println("Content-Type: multipart/form-data; boundary=" + boundary);
+    client.println("Connection: close");
+    client.println();
+
+    // 🌟 THE INDIVISIBLE PUSH: Fire the combined string, binary, and footer in one single data block
+    client.write(staticBinaryBuffer, totalPayloadLen);
+
+    if (Serial) Serial.println("[✔ SUCCESS] Combined data payload pushed out via Wi-Fi stack.");
 }
+
 

@@ -100,8 +100,14 @@ void loop() {
         isLockoutActive = false;
     }
 
-    // IDLE HEARTBEAT: Only prints dots if the system is unlocked and waiting
-    if (!isLockoutActive && (currentMillis - lastHeartbeatTime >= 3000)) {
+    // ⏱️ PRE-FLIGHT LOCKOUT GATE: Skip camera scanning if the system is cooling down
+    if (isLockoutActive) {
+        // Optional: print down-counter metrics cleanly here if desired
+        return; 
+    }
+
+    // IDLE HEARTBEAT: Only prints asterisks if the system is unlocked and waiting
+    if (currentMillis - lastHeartbeatTime >= 3000) {
         lastHeartbeatTime = currentMillis;
         Serial.print("*"); 
     }
@@ -125,25 +131,9 @@ void loop() {
 
             if (confidence > 60) {
                 
-                // // 🛑 CASE 1: MATCH FOUND BUT LOCKOUT IS ACTIVE (Prints a down-counter)
-                // if (isLockoutActive) {
-                //     unsigned long timeElapsed = currentMillis - lockoutTimerStart;
-                //     unsigned long timeRemaining = (timeElapsed < ANTI_FLOOD_INTERVAL) ? (ANTI_FLOOD_INTERVAL - timeElapsed) : 0;
-                //     float remainingSeconds = timeRemaining / 1000.0;
-
-                //     Serial.println("\n------------------------------------------------");
-                //     Serial.print("[🛑 LOCKOUT ACTIVE] Target ID: "); Serial.print(currentID);
-                //     Serial.print(" (Conf: "); Serial.print(confidence); Serial.println("%) ignored.");
-                //     Serial.print(" ➔ Next upload available in: ");
-                //     Serial.print(remainingSeconds, 1);
-                //     Serial.println(" seconds.");
-                //     Serial.println("------------------------------------------------");
-                //     return; 
-                // }
-
-                // // 🚀 CASE 2: MATCH FOUND AND SYSTEM IS READY (No longer cares if it's the same gesture!)
-                // lockoutTimerStart = currentMillis; 
-                // isLockoutActive = true; 
+                // 🚀 ENGAGE ANTI-FLOOD TIMER IMMEDIATELY
+                lockoutTimerStart = currentMillis; 
+                isLockoutActive = true; 
 
                 String gestureName = "";
                 if (currentID == 0) gestureName = "PAPER";
@@ -157,12 +147,13 @@ void loop() {
                 Serial.println("\n================================================");
 
                 // Pull the actual image payload now that the trigger is validated
-                //AI.invoke(0, false, true);
                 String rawBase64 = AI.last_image();
 
                 // Forward to your dummy network function
                 sendDummyTelegramJpgFile(rawBase64, gestureName); 
-                AI.invoke(1, true, false); // stop retriggering pathology
+                
+                // Clear hardware registers to completely resolve retrigger loops
+                AI.invoke(1, true, false); 
             }
         }
     }

@@ -103,7 +103,7 @@ void loop() {
     // IDLE HEARTBEAT: Only prints dots if the system is unlocked and waiting
     if (!isLockoutActive && (currentMillis - lastHeartbeatTime >= 3000)) {
         lastHeartbeatTime = currentMillis;
-        Serial.print("."); 
+        Serial.print("*"); 
     }
 
     if (currentMillis - lastCheckTime >= checkInterval) {
@@ -152,6 +152,7 @@ void loop() {
 
                 Serial.println("\n================================================");
                 Serial.print("[🚀 ALERT TRIGGERED] Valid Match: "); Serial.println(gestureName);
+                Serial.print("[🚀 ALERT TRIGGERED] Confidence: "); Serial.print(confidence); Serial.println("%");
                 Serial.print("[📷 IMAGE CAPTURE] Fetching JPEG buffer frame...");
                 Serial.println("\n================================================");
 
@@ -198,12 +199,11 @@ void sendDummyTelegramJpgFile(const String& base64Str, const String& gestureName
     }
 
     // 5. STITCH PACKET COMPONENT RAILS INSIDE STATIC GLOBAL BUFFER
-    //memcpy(staticBinaryBuffer, head.c_str(), head.length());
-    
+    // Step A: Decode Base64 straight into index 0 of global memory to guarantee 4-byte alignment
     size_t actualBinaryLen = 0;
     int decodeStatus = mbedtls_base64_decode(
-        staticBinaryBuffer + head.length(),              
-        STATIC_BUFFER_SIZE - head.length(),              
+        staticBinaryBuffer,              // Always decode to base pointer position 0
+        STATIC_BUFFER_SIZE,              
         &actualBinaryLen, 
         (const unsigned char*)base64Str.c_str(), 
         base64Str.length()
@@ -216,6 +216,24 @@ void sendDummyTelegramJpgFile(const String& base64Str, const String& gestureName
         }
         return;
     }
+
+    // Recalculate strict final length after exact decoding
+    totalPayloadLen = head.length() + actualBinaryLen + tail.length();
+    if (Serial) {
+        Serial.print(" totalPayloadLen: "); 
+        Serial.print(totalPayloadLen); 
+        Serial.println(" bytes.");
+    }
+    
+    // Step B: Shift the raw binary data down the buffer to make room for the text header
+    memmove(staticBinaryBuffer + head.length(), staticBinaryBuffer, actualBinaryLen);
+
+    // Step C: Copy the text header cleanly into the newly opened front slot
+    memcpy(staticBinaryBuffer, head.c_str(), head.length());
+    
+    // Step D: Append the multipart footer text right after the shifted binary payload ends
+    memcpy(staticBinaryBuffer + head.length() + actualBinaryLen, tail.c_str(), tail.length());
+
 
     // Recalculate final precise payload window
     totalPayloadLen = head.length() + actualBinaryLen + tail.length();

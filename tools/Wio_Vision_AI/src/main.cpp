@@ -25,10 +25,16 @@ const unsigned long ANTI_FLOOD_INTERVAL = 15000;
 unsigned long lockoutTimerStart = 0;             
 bool isLockoutActive = false; 
 
+// FIXED TIME-LAPSE TELEMETRY INTERVAL
+unsigned long lastTelemetryTime = 0;
+const unsigned long telemetryInterval = 60000; // Sent exactly every 60 seconds (1 minute)
+
+
 // TIMEOUTS AND MONITORING
 unsigned long lastHeartbeatTime = 0;
 
 void sendTelegramJpgFile(const String& base64Str, const String& gestureName);
+void sendTelegramTextMessage(const String& labelText);
 uint32_t assembleMultipartBuffer(const String& base64Str, const String& gestureName, const String& boundary);
 
 
@@ -37,6 +43,9 @@ void setup() {
     
     // HEADLESS OPERATION WINDOW: Avoid freezes when running on garden battery
     unsigned long startWindow = millis();
+        // Initialize the telemetry clock right at startup completion
+    lastTelemetryTime = millis();
+
     while (!Serial && (millis() - startWindow < 3000)) {
         delay(10);
     }
@@ -95,6 +104,22 @@ void setup() {
 
 void loop() {
     unsigned long currentMillis = millis();
+
+    // 1. FIXED TIME-LAPSE TELEMETRY TRIGGER
+    // This loop path operates independently from any AI match variables or lockouts
+    if (currentMillis - lastTelemetryTime >= telemetryInterval) {
+        lastTelemetryTime = currentMillis;
+        
+        if (Serial) {
+            Serial.println("\n================================================");
+            Serial.println("[TIMELAPSE] 60s Interval Reached. Send RSSI Message...");
+            Serial.println("================================================");
+        }
+        
+        sendTelegramTextMessage("RSSI Message");
+            
+    }
+
 
     // ⏱️ AUTOMATIC ANTI-FLOOD LOCKOUT RELEASE CHECKER
     if (isLockoutActive && (currentMillis - lockoutTimerStart >= ANTI_FLOOD_INTERVAL)) {
@@ -188,6 +213,45 @@ void sendDummyTelegramJpgFile(const String& base64Str, const String& gestureName
         Serial.println("====================================================");
     }
 }
+
+void sendTelegramTextMessage(const String& labelText) {
+    // Verify local Wi-Fi state before initiating an external radio network handshake
+    if (WiFi.status() != WL_CONNECTED) {
+        if (Serial) Serial.println("[ERROR] Wi-Fi link dropped. Aborting text telemetry.");
+        return;
+    }
+
+    WiFiClientSecure client;
+    client.setInsecure();
+    client.setTimeout(5); // Fast 5-second timeout for text packets
+
+    if (!client.connect("api.telegram.org", 443)) {
+        if (Serial) Serial.println("[ERROR] Connection to Telegram text gateway failed.");
+        return;
+    }
+
+    // Construct standard URL-encoded text message parameters
+    // Format: "TIMELAPSE | Link Strength: -34 dBm"
+    String messageText = labelText + " | Link Strength: " + String(WiFi.RSSI()) + " dBm";
+    
+    // Replace any spaces with URL-safe equivalents (%20) to prevent HTTP protocol breaks
+    messageText.replace(" ", "%20");
+    
+    String urlPath = "/bot" + botToken + "/sendMessage?chat_id=" + chatID + "&text=" + messageText;
+
+    // Execute standard lightweight HTTP GET request
+    client.println("GET " + urlPath + " HTTP/1.1");
+    client.println("Host: api.telegram.org");
+    client.println("Connection: close");
+    client.println();
+
+    if (Serial) {
+        Serial.print("[SUCCESS] Text telemetry RSSI message (");
+        Serial.print(messageText);
+        Serial.println(") successfully delivered via secure radio stacks.");
+    }
+}
+
 
 void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
     String boundary = "----ESP32C3Boundary";

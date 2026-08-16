@@ -1,26 +1,113 @@
 #include <Arduino.h>
 #include <Wire.h>
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
 #include <Seeed_Arduino_SSCMA.h>
 #include "mbedtls/base64.h"
-#include "secrets.h"
-
-// CONFIGURATION PARAMETERS
-const char* ssid     = SECRET_SSID;
-const char* password = SECRET_PASS;
-const String botToken = SECRET_TOKEN;
-const String chatID   = SECRET_ID;
-
-#define TELEGRAM_IP 149.154.166.110
-
-// Static Buffer for Fragmentation Prevention
-#define STATIC_BUFFER_SIZE 8192
-unsigned char staticBinaryBuffer[STATIC_BUFFER_SIZE];
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+#include <BLE2902.h>
 
 SSCMA AI;
+
+// 📦 FIXED STATIC HEAP RING BUFFER (4 slots x 8000 bytes = ~32 KB)
+#define BUFFER_SLOTS 4
+#define IMAGE_SLOT_SIZE 8000
+
+unsigned char imageRingBuffer[BUFFER_SLOTS][IMAGE_SLOT_SIZE];
+uint32_t imageLengths[BUFFER_SLOTS] = {0, 0, 0, 0};
+String imageMetadata[BUFFER_SLOTS] = {"Empty Slot", "Empty Slot", "Empty Slot", "Empty Slot"};
+
+int writeIndex = 0;      // Tracks where the camera writes the next fresh image
+int selectedSlot = 0;    // Tracks which slot your phone app wants to read
+uint32_t currentOffset = 0; // Tracks data chunk position during transmission
+
+
+// BLE REWRITE SERVICE & CHARACTERISTIC AUTO-GENERATION UUIDS
+#define SERVICE_UUID           "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define METADATA_CHAR_UUID     "beb5483e-36e1-4688-b7f5-ea07361b26a8" // Read Only
+#define CONTROL_CHAR_UUID      "e3223119-9445-4e7d-8700-d5382c474d21" // Read/Write
+#define DATA_STREAM_CHAR_UUID  "622a5785-5ee6-4e58-9cf8-6628fb05cf71" // Read Only
+
+BLEServer* pServer = NULL;
+BLECharacteristic* pMetadataChar = NULL;
+BLECharacteristic* pControlChar = NULL;
+BLECharacteristic* pDataStreamChar = NULL;
+bool deviceConnected = false;
+
+void storeImageInRingBuffer(const String& base64Str, const String& labelName, int confidence);
+
+class ServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+        deviceConnected = true;
+        if (Serial) Serial.println("\n[📱 BLE] Phone linked successfully! Synchronizing links...");
+    }
+    void onDisconnect(BLEServer* pServer) {
+        deviceConnected = false;
+        if (Serial) Serial.println("\n[❌ BLE] Phone disconnected. Returning to camera monitoring loop.");
+        // Restart advertising so it can be re-found in the garden
+        BLEDevice::startAdvertising();
+    }
+};
+
+// Handlers for Slot Selection & Stream Chunking
+class ControlCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic* pCharacteristic) {
+        std::string rawValue = pCharacteristic->getValue();
+        if (rawValue.length() > 0) {
+            int requestedSlot = rawValue[0] - '0'; // Convert ASCII char digit to literal int
+            if (requestedSlot >= 0 && requestedSlot < BUFFER_SLOTS) {
+                selectedSlot = requestedSlot;
+                currentOffset = 0; // Reset chunk pointer to the beginning of the new picture
+                
+                // Dynamically update your phone view with what target is saved inside that slot
+                String meta = "Slot [" + String(selectedSlot) + "] Meta: " + imageMetadata[selectedSlot] + " | Length: " + String(imageLengths[selectedSlot]) + " bytes";
+                pMetadataChar->setValue(meta.c_str());
+                pMetadataChar->notify();
+
+                // Prime the first 240 bytes of raw data inside the stream register
+                uint32_t totalLen = imageLengths[selectedSlot];
+                uint32_t chunkLen = (totalLen > 240) ? 240 : totalLen;
+                if (totalLen > 0) {
+                    pDataStreamChar->setValue(&imageRingBuffer[selectedSlot][0], chunkLen);
+                    currentOffset += chunkLen;
+                } else {
+                    pDataStreamChar->setValue("No Data");
+                }
+                
+                if (Serial) {
+                    Serial.print("[🎯 BLE CONTROL] Phone selected Slot: "); Serial.print(selectedSlot);
+                    Serial.print(" | Meta parsed: "); Serial.println(imageMetadata[selectedSlot]);
+                }
+            }
+        }
+    }
+
+    void onRead(BLECharacteristic* pCharacteristic) {
+        // When your phone reads Characteristic 2 (Data Chunker), automatically advance 
+        // forward to package the NEXT sequential 240-byte slice of the image
+        uint32_t totalLen = imageLengths[selectedSlot];
+        if (currentOffset < totalLen) {
+            uint32_t remaining = totalLen - currentOffset;
+            uint32_t chunkLen = (remaining > 240) ? 240 : remaining;
+            
+            pDataStreamChar->setValue(&imageRingBuffer[selectedSlot][currentOffset], chunkLen);
+            currentOffset += chunkLen;
+            
+            if (Serial) {
+                Serial.print("[📤 BLE STREAM] Piped chunk offset: "); Serial.print(currentOffset);
+                Serial.print("/"); Serial.print(totalLen); Serial.println(" bytes down the air rails.");
+            }
+        } else {
+            // End of File marker signature to signal your terminal app that the JPEG is finished
+            pDataStreamChar->setValue("EOF");
+        }
+    }
+};
+
+// loop control
 unsigned long lastCheckTime = 0;
 const unsigned long checkInterval = 200; // Snappy 200ms camera scan rate
+unsigned long lastHeartbeatTime = 0;
 
 // ⏱️ ANTI-FLOOD LOCKOUT SYSTEM
 const unsigned long ANTI_FLOOD_INTERVAL = 15000; 
@@ -30,35 +117,21 @@ bool isLockoutActive = false;
 // FIXED TIME-LAPSE TELEMETRY INTERVAL
 unsigned long lastTelemetryTime = 0;
 const unsigned long telemetryInterval = 60000; // Sent exactly every 60 seconds (1 minute)
-
-
-// TIMEOUTS AND MONITORING
-unsigned long lastHeartbeatTime = 0;
-
-void sendTelegramJpgFile(const String& base64Str, const String& gestureName);
-void sendTelegramTextMessage(const String& labelText);
-uint32_t assembleMultipartBuffer(const String& base64Str, const String& gestureName, const String& boundary);
-
-
 void setup() {
     Serial.begin(115200);
     
-    // HEADLESS OPERATION WINDOW: Avoid freezes when running on garden battery
     unsigned long startWindow = millis();
-        // Initialize the telemetry clock right at startup completion
-    lastTelemetryTime = millis();
-
     while (!Serial && (millis() - startWindow < 3000)) {
         delay(10);
     }
     
     if (Serial) {
         Serial.println("\n================================================");
-        Serial.println("[🔋 STANDALONE PRODUCTION] Booting Stable Radio Rails...");
+        Serial.println("[🔋 STANDALONE BLE CAPTURE] Booting Local Memory Rig...");
         Serial.println("================================================");
     }
 
-    // Initialize I2C layers first
+    // Initialize I2C layers cleanly
     Wire.begin(6, 7); 
     Wire.setClock(400000); 
     
@@ -67,79 +140,82 @@ void setup() {
         while (1) { delay(1000); }
     }
     if (Serial) Serial.println("[SUCCESS] Camera board online over I2C.");
-    delay(1000); // Allow rails to settle before turning on wireless engine
-
-    // CLEAN HARDWARE WIRELESS RESET
-    WiFi.disconnect(true); 
     delay(500);
-    WiFi.mode(WIFI_STA);
-    
-    //  OPTIMIZATION: Throttling TX Power prevents internal C3 silicon reflections out in the garden
-    WiFi.setTxPower(WIFI_POWER_11dBm); 
 
-    WiFi.begin(ssid, password);
+    // 🌟 INITIATE SECURE STANDALONE BLE CONTROLLER
+    BLEDevice::init("XIAO-GARDEN-CAM");
     
-    int connectionTimeoutCounter = 0;
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        if (Serial) Serial.print(".");
-        connectionTimeoutCounter++;
-        
-        if (connectionTimeoutCounter > 30) { 
-            if (Serial) Serial.println("\n[⚠️ TIMEOUT] Resetting Wi-Fi adapter adapter...");
-            WiFi.disconnect();
-            delay(1000);
-            WiFi.begin(ssid, password);
-            connectionTimeoutCounter = 0;
-        }
-    }
-    
+    // Configure local radio layers for optimal transmission
+    BLEDevice::setPower(ESP_PWR_LVL_P9); // Fire radio at full strength for garden range penetration
+
+    pServer = BLEDevice::createServer();
+    pServer->setCallbacks(new ServerCallbacks());
+
+    // Create Core Service
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+
+    // Characteristic A: Metadata Info display line (Read-Only)
+    pMetadataChar = pService->createCharacteristic(
+                      METADATA_CHAR_UUID,
+                      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+                    );
+    pMetadataChar->addDescriptor(new BLE2902());
+    pMetadataChar->setValue("No image requested yet. Write slot 0-3 to Control characteristic.");
+
+    // Characteristic B: Slot selector command terminal (Read/Write)
+    pControlChar = pService->createCharacteristic(
+                     CONTROL_CHAR_UUID,
+                     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE
+                   );
+    pControlChar->setCallbacks(new ControlCallbacks());
+
+    // Characteristic C: High-Speed sequential data stream rail (Read-Only)
+    pDataStreamChar = pService->createCharacteristic(
+                        DATA_STREAM_CHAR_UUID,
+                        BLECharacteristic::PROPERTY_READ
+                      );
+
+    // Launch background services
+    pService->start();
+
+    // Configure Advertising wrapper so your phone can find the device offline
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->setScanResponse(true);
+    pAdvertising->setMinPreferred(0x06);  // functions help with iPhone connection speed syncing
+    pAdvertising->setMinPreferred(0x12);
+    BLEDevice::startAdvertising();
+
     if (Serial) {
-        Serial.println("\n[🎉 CONNECTED] Wi-Fi Link Established!");
-        Serial.print("IP Address: ");
-        Serial.println(WiFi.localIP());
-        Serial.print("RSSI Connection Strength: ");
-        Serial.print(WiFi.RSSI());
-        Serial.println(" dBm");
+        Serial.println("[🎉 INITIALIZED] Offline BLE Array Engine Broadcasting.");
+        Serial.println(" -> Bluetooth Device Name: XIAO-GARDEN-CAM");
+        Serial.println(" -> Ready to buffer target alerts natively into RAM.");
+        Serial.println("================================================");
     }
 }
+
 
 void loop() {
     unsigned long currentMillis = millis();
 
-    // 1. FIXED TIME-LAPSE TELEMETRY TRIGGER
-    // This loop path operates independently from any AI match variables or lockouts
-    if (currentMillis - lastTelemetryTime >= telemetryInterval) {
-        lastTelemetryTime = currentMillis;
-        
-        if (Serial) {
-            Serial.println("\n================================================");
-            Serial.println("[TIMELAPSE] 60s Interval Reached. Send RSSI Message...");
-            Serial.println("================================================");
-        }
-        
-        sendTelegramTextMessage("RSSI Message");      
-    }
-
-
     // ⏱️ AUTOMATIC ANTI-FLOOD LOCKOUT RELEASE CHECKER
     if (isLockoutActive && (currentMillis - lockoutTimerStart >= ANTI_FLOOD_INTERVAL)) {
-        Serial.println("\n[⏱️ LOCKOUT SYSTEM] Cooldown window expired. Alerts unlocked and ready.");
+        if (Serial) Serial.println("\n[⏱️ LOCKOUT SYSTEM] Cooldown window expired. Buffers ready for next target.");
         isLockoutActive = false;
     }
 
     // ⏱️ PRE-FLIGHT LOCKOUT GATE: Skip camera scanning if the system is cooling down
     if (isLockoutActive) {
-        // Optional: print down-counter metrics cleanly here if desired
         return; 
     }
 
-    // IDLE HEARTBEAT: Only prints asterisks if the system is unlocked and waiting
+    // IDLE HEARTBEAT: Only prints asterisks if a computer is actively listening
     if (currentMillis - lastHeartbeatTime >= 3000) {
         lastHeartbeatTime = currentMillis;
-        Serial.print("*"); 
+        if (Serial) Serial.print("*"); 
     }
 
+    // STANDARD AI PERSON TRACKING WINDOW
     if (currentMillis - lastCheckTime >= checkInterval) {
         lastCheckTime = currentMillis;
 
@@ -147,8 +223,10 @@ void loop() {
         int status = AI.invoke(1, false, true);
 
         if (status < 0) {
-            Serial.print("\n[❌ I2C ERROR] Camera bus read failed. Status: ");
-            Serial.println(status);
+            if (Serial) {
+                Serial.print("\n[❌ I2C ERROR] Camera bus read failed. Status: ");
+                Serial.println(status);
+            }
             return; 
         }
 
@@ -157,182 +235,49 @@ void loop() {
             int currentID = AI.boxes()[0].target;
             int confidence = AI.boxes()[0].score;
 
-            if (confidence > 75) {
+            if (confidence > 60) {
                 
-                // 🚀 ENGAGE ANTI-FLOOD TIMER IMMEDIATELY
+                // ENGAGE ANTI-FLOOD TIMER IMMEDIATELY
                 lockoutTimerStart = currentMillis; 
                 isLockoutActive = true; 
 
-                String gestureName = "";
-                if (currentID == 0) gestureName = "PERSON";
-                else  gestureName = "HUH?";
+                // Remap the incoming data index for the Person YOLO model
+                String targetName = "";
+                if (currentID == 0) {
+                    targetName = "PERSON"; 
+                } else {
+                    targetName = "UNKNOWN"; 
+                }
 
-                Serial.println("\n================================================");
-                Serial.print("[🚀 ALERT TRIGGERED] Valid Match: "); Serial.println(gestureName);
-                Serial.print("[🚀 ALERT TRIGGERED] Confidence: "); Serial.print(confidence); Serial.println("%");
-                Serial.print("[📷 IMAGE CAPTURE] Fetching JPEG buffer frame...");
-                Serial.println("\n================================================");
+                if (Serial) {
+                    Serial.println("\n================================================");
+                    Serial.print("[🚀 TARGET DETECTED] Valid Match: "); Serial.println(targetName);
+                    Serial.print("[🚀 TARGET DETECTED] Confidence: "); Serial.print(confidence); Serial.println("%");
+                    Serial.println("================================================");
+                }
 
-                // Pull the actual image payload now that the trigger is validated
+                // Extract the raw Base64 data string from the camera registers
                 String rawBase64 = AI.last_image();
 
-                // Forward to your network function
-                sendTelegramJpgFile(rawBase64, gestureName); 
+                // Save the data directly inside your 4-slot static ring buffer array
+                storeImageInRingBuffer(rawBase64, targetName, confidence);
                 
                 // Clear hardware registers to completely resolve retrigger loops
                 AI.invoke(1, true, false); 
             }
         }
-        
-    } 
-}
-
-
-void sendDummyTelegramJpgFile(const String& base64Str, const String& gestureName) {
-    String boundary = "----ESP32C3Boundary";
-
-    // 🌟 EXECUTE ABSTRACTED BUFFER ASSEMBLY
-    uint32_t totalPayloadLen = assembleMultipartBuffer(base64Str, gestureName, boundary);
-
-    // If the helper function encountered an error or memory exception, it returns 0
-    if (totalPayloadLen == 0) {
-        if (Serial) Serial.println("[⚠️ SIMULATION] Aborting due to buffer assembly failure.");
-        return;
-    }
-
-    // 6. SIMULATE LOCAL NETWORK TRANSMISSION
-    if (Serial) {
-        Serial.println("====================================================");
-        Serial.print("[DUMMY NETWORK] Simulating Telegram Upload for: ");
-        Serial.println(gestureName);
-        Serial.print("[DUMMY NETWORK] Total Consolidated Payload Size: ");
-        Serial.print(totalPayloadLen);
-        Serial.println(" bytes.");
-        Serial.print("[DUMMY NETWORK] Active Hotspot Connection Strength: ");
-        Serial.print(WiFi.RSSI());
-        Serial.println(" dBm");
-        Serial.println("====================================================");
-    }
-}
-
-void sendTelegramTextMessage(const String& labelText) {
-    // Verify local Wi-Fi state before initiating an external radio network handshake
-    if (WiFi.status() != WL_CONNECTED) {
-        if (Serial) Serial.println("[ERROR] Wi-Fi link dropped. Aborting text telemetry.");
-        return;
-    }
-
-    WiFiClientSecure client;
-    client.setInsecure();
-    client.setTimeout(5); // Fast 5-second timeout for text packets
-
-    if (!client.connect("api.telegram.org", 443)) {
-        if (Serial) Serial.println("[ERROR] Connection to Telegram text gateway failed.");
-        return;
-    }
-
-    // Construct standard URL-encoded text message parameters
-    // Format: "TIMELAPSE | Link Strength: -34 dBm"
-    String messageText = labelText + " | Link Strength: " + String(WiFi.RSSI()) + " dBm";
-    
-    // Replace any spaces with URL-safe equivalents (%20) to prevent HTTP protocol breaks
-    messageText.replace(" ", "%20");
-    
-    String urlPath = "/bot" + botToken + "/sendMessage?chat_id=" + chatID + "&text=" + messageText;
-
-    // Execute standard lightweight HTTP GET request
-    client.println("GET " + urlPath + " HTTP/1.1");
-    client.println("Host: api.telegram.org");
-    client.println("Connection: close");
-    client.println();
-
-    if (Serial) {
-        Serial.print("[SUCCESS] Text telemetry RSSI message (");
-        Serial.print(messageText);
-        Serial.println(") successfully delivered via secure radio stacks.");
     }
 }
 
 
-void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
-    String boundary = "----ESP32C3Boundary";
 
-    // Call our abstracted alignment function to map out memory arrays natively
-    uint32_t totalPayloadLen = assembleMultipartBuffer(base64Str, gestureName, boundary);
-    Serial.print("[NETWORK] Total Consolidated Payload Size: ");
-    Serial.println(totalPayloadLen);
-
-    if (totalPayloadLen == 0) {
-        if (Serial) Serial.println("[WARNING] Aborting network send due to buffer assembly failure.");
-        return;
-    }
-
-    // Verify local Wi-Fi state before initiating an external radio network handshake
-    if (WiFi.status() != WL_CONNECTED) {
-        if (Serial) Serial.println("[ERROR] Wi-Fi link dropped. Aborting secure upload.");
-        return;
-    }
-
-    WiFiClientSecure client;
-    client.setInsecure(); 
-    client.setTimeout(8); // Generous 8s window protects against garden network path fragmentation
-
-    if (!client.connect("api.telegram.org", 443)) {
-        if (Serial) Serial.println("[ERROR] Connection to secure Telegram gateway endpoint failed.");
-        return;
-    }
-
-    // SEND SYSTEM MANIFEST HTTP POST ROUTING HEADERS
-    client.println("POST /bot" + botToken + "/sendPhoto HTTP/1.1");
-    client.println("Host: api.telegram.org");
-    client.println("Content-Length: " + String(totalPayloadLen));
-    client.println("Content-Type: multipart/form-data; boundary=" + boundary);
-    client.println("Connection: close");
-    client.println();
-
-    // THE HIGH-SPEED INDIVISIBLE PUSH
-    // Pushes the exact total composite payload block in one solid packet over the air rails
-    client.write(staticBinaryBuffer, totalPayloadLen);
-
-    if (Serial) {
-        Serial.print("[SUCCESS] Indivisible payload package (");
-        Serial.print(totalPayloadLen);
-        Serial.println(" bytes) successfully delivered via secure radio stacks.");
-    }
-}
-
-
-uint32_t assembleMultipartBuffer(const String& base64Str, const String& gestureName, const String& boundary) {
-    // 1. PRE-FLIGHT BOUNDS CALCULATION
-    size_t estimatedBinaryLen = (base64Str.length() * 3) / 4;
-
-    // 2. CONSTRUCT INDIVIDUAL TEXT HEAD AND TAIL RAILS
-    String head = "--" + boundary + "\r\n" +
-                  "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n" + chatID + "\r\n" +
-                  "--" + boundary + "\r\n" +
-                  "Content-Disposition: form-data; name=\"caption\"\r\n\r\nMatch: " + gestureName + " (RSSI: " + String(WiFi.RSSI()) + "dBm)\r\n" +
-                  "--" + boundary + "\r\n" +
-                  "Content-Disposition: form-data; name=\"photo\"; filename=\"capture.jpg\"\r\n" +
-                  "Content-Type: image/jpeg\r\n\r\n";
-    String tail = "\r\n--" + boundary + "--\r\n";
-
-    // 3. RUN STRUCTURAL SIZE EVALUATION GATE
-    uint32_t totalPayloadLen = head.length() + estimatedBinaryLen + tail.length();
-
-    if (totalPayloadLen > STATIC_BUFFER_SIZE) {
-        if (Serial) {
-            Serial.println("\n[❌ MEMORY EXCEPTION] Composite allocation limit exceeded!");
-            Serial.print(" -> Required Buffer Size: "); Serial.print(totalPayloadLen); Serial.println(" bytes.");
-            Serial.print(" -> Static Buffer Limit:  "); Serial.print(STATIC_BUFFER_SIZE); Serial.println(" bytes.");
-        }
-        return 0; // Returns 0 as an explicit error signature to tell the caller to abort
-    }
-
-    // 4. DECODE RAW BINARY DIRECTLY INTO BASE POSITION ZERO FOR STRICT 4-BYTE ALIGNMENT
+void storeImageInRingBuffer(const String& base64Str, const String& labelName, int confidence) {
     size_t actualBinaryLen = 0;
+    
+    // Decode Base64 straight into the exact 4-byte aligned slot pointer row
     int decodeStatus = mbedtls_base64_decode(
-        staticBinaryBuffer,              
-        STATIC_BUFFER_SIZE,              
+        imageRingBuffer[writeIndex],              
+        IMAGE_SLOT_SIZE,              
         &actualBinaryLen, 
         (const unsigned char*)base64Str.c_str(), 
         base64Str.length()
@@ -340,25 +285,26 @@ uint32_t assembleMultipartBuffer(const String& base64Str, const String& gestureN
 
     if (decodeStatus != 0) {
         if (Serial) {
-            Serial.print("[❌ CODEC ERROR] Base64 image decode failed. Status: ");
+            Serial.print("[❌ CACHE FAULT] Base64 decoding failed. Status: ");
             Serial.println(decodeStatus);
         }
-        return 0; 
+        return;
     }
 
-    // 5. STITCH PACKET COMPONENT RAILS INSIDE STATIC GLOBAL SPACE
-    // Step A: Shift the raw binary data cleanly down the buffer to carve out room for headers
-    memmove(staticBinaryBuffer + head.length(), staticBinaryBuffer, actualBinaryLen);
+    // Save the metrics profile into the matching tracker arrays
+    imageLengths[writeIndex] = actualBinaryLen;
+    imageMetadata[writeIndex] = "Target: " + labelName + " (" + String(confidence) + "%)";
 
-    // Step B: Copy the text header string directly into the newly opened front slot
-    memcpy(staticBinaryBuffer, head.c_str(), head.length());
-    
-    // Step C: Append the multipart footer text right after the shifted binary payload ends
-    memcpy(staticBinaryBuffer + head.length() + actualBinaryLen, tail.c_str(), tail.length());
+    if (Serial) {
+        Serial.println("\n====================================================");
+        Serial.print("[💾 MEMORY BUFFER] Image stored in Slot ["); Serial.print(writeIndex); Serial.println("]");
+        Serial.print("[💾 MEMORY BUFFER] Payload Size: "); Serial.print(actualBinaryLen); Serial.println(" bytes.");
+        Serial.print("[💾 MEMORY BUFFER] Active Slot Label: "); Serial.println(imageMetadata[writeIndex]);
+        Serial.println("====================================================");
+    }
 
-    // 6. CALCULATE AND RETURN PRECISE TOTAL COMBINED LENGTH
-    totalPayloadLen = head.length() + actualBinaryLen + tail.length();
-    return totalPayloadLen;
+    // Advance the write pointer (wraps around automatically from 3 back to 0)
+    writeIndex = (writeIndex + 1) % BUFFER_SLOTS;
 }
 
 

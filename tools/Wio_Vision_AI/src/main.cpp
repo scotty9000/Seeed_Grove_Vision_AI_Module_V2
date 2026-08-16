@@ -12,6 +12,8 @@ const char* password = SECRET_PASS;
 const String botToken = SECRET_TOKEN;
 const String chatID   = SECRET_ID;
 
+#define TELEGRAM_IP 149.154.166.110
+
 // Static Buffer for Fragmentation Prevention
 #define STATIC_BUFFER_SIZE 8192
 unsigned char staticBinaryBuffer[STATIC_BUFFER_SIZE];
@@ -72,9 +74,9 @@ void setup() {
     delay(500);
     WiFi.mode(WIFI_STA);
     
-    // 🌟 OPTIMIZATION: Throttling TX Power prevents internal C3 silicon reflections out in the garden
+    //  OPTIMIZATION: Throttling TX Power prevents internal C3 silicon reflections out in the garden
     WiFi.setTxPower(WIFI_POWER_11dBm); 
-    
+
     WiFi.begin(ssid, password);
     
     int connectionTimeoutCounter = 0;
@@ -116,8 +118,7 @@ void loop() {
             Serial.println("================================================");
         }
         
-        sendTelegramTextMessage("RSSI Message");
-            
+        sendTelegramTextMessage("RSSI Message");      
     }
 
 
@@ -156,16 +157,15 @@ void loop() {
             int currentID = AI.boxes()[0].target;
             int confidence = AI.boxes()[0].score;
 
-            if (confidence > 60) {
+            if (confidence > 75) {
                 
                 // 🚀 ENGAGE ANTI-FLOOD TIMER IMMEDIATELY
                 lockoutTimerStart = currentMillis; 
                 isLockoutActive = true; 
 
                 String gestureName = "";
-                if (currentID == 0) gestureName = "PAPER";
-                else if (currentID == 1) gestureName = "ROCK";
-                else if (currentID == 2) gestureName = "SCISSORS";
+                if (currentID == 0) gestureName = "PERSON";
+                else  gestureName = "HUH?";
 
                 Serial.println("\n================================================");
                 Serial.print("[🚀 ALERT TRIGGERED] Valid Match: "); Serial.println(gestureName);
@@ -183,7 +183,8 @@ void loop() {
                 AI.invoke(1, true, false); 
             }
         }
-    }
+        
+    } 
 }
 
 
@@ -258,6 +259,8 @@ void sendTelegramJpgFile(const String& base64Str, const String& gestureName) {
 
     // Call our abstracted alignment function to map out memory arrays natively
     uint32_t totalPayloadLen = assembleMultipartBuffer(base64Str, gestureName, boundary);
+    Serial.print("[NETWORK] Total Consolidated Payload Size: ");
+    Serial.println(totalPayloadLen);
 
     if (totalPayloadLen == 0) {
         if (Serial) Serial.println("[WARNING] Aborting network send due to buffer assembly failure.");

@@ -85,7 +85,7 @@ document.getElementById('connectBtn').addEventListener('click', async () => {
     }
 });
 
-// STEP B: Process the High-Speed Read Loop and Stitch the Binary Blocks
+// STEP B: Bounded Bounded Downloader with Step-by-Step Telemetry
 document.getElementById('downloadBtn').addEventListener('click', async () => {
     const slot = document.getElementById('slotSelect').value;
     document.getElementById('status').innerText = "Status: Requesting Slot [" + slot + "]...";
@@ -94,17 +94,24 @@ document.getElementById('downloadBtn').addEventListener('click', async () => {
     document.getElementById('progressOuter').style.display = 'none';
     document.getElementById('progressInner').style.width = '0%';
 
+    console.log(`\n=================== [📡 TELEMETRY PASS START] ===================`);
+    console.log(`[1] Selected Slot Target: "${slot}" (Parsed Int: ${parseInt(slot)})`);
+
     try {
-        // Send choice to Control Characteristic (Sends single raw byte 0x00 - 0x03)
+        // Send initial single slot selection byte
         const slotByte = new Uint8Array([parseInt(slot)]);
+        console.log(`[2] Sending Initial Slot Configuration Byte: [0x${slotByte[0].toString(16).toUpperCase().padStart(2, '0')}]`);
         await controlChar.writeValue(slotByte);
         
+        console.log(`[3] Pausing 400ms for hardware pointer alignment...`);
         await new Promise(resolve => setTimeout(resolve, 400)); 
 
-        // Read and display the text metadata row
+        // Read and parse metadata row size metrics
+        console.log(`[4] Requesting Metadata Characteristic raw read...`);
         const metaVal = await metaChar.readValue();
         const decoder = new TextDecoder();
         const metaText = decoder.decode(metaVal);
+        console.log(` -> Raw Metadata Received String: "${metaText}"`);
         document.getElementById('metadata').innerText = metaText;
         document.getElementById('metadata').style.display = 'block';
 
@@ -112,62 +119,83 @@ document.getElementById('downloadBtn').addEventListener('click', async () => {
         const lengthMatch = metaText.match(/Length:\s*(\d+)/);
         if (lengthMatch) {
             totalBytesExpected = parseInt(lengthMatch[1]);
+            console.log(` -> Match extraction success. Bytes expected: ${totalBytesExpected}`);
+        } else {
+            console.warn(` -> ⚠️ Regular Expression failed to find a valid 'Length: XX' number inside text!`);
         }
 
         if (totalBytesExpected === 0) {
+            console.error(` -> ❌ Terminating: Bailing because expected bytes computed to 0.`);
             document.getElementById('status').innerText = "Status: Selected slot contains no valid image data.";
             document.getElementById('downloadBtn').disabled = false;
             return;
         }
 
+        const maxChunkSize = 240;
+        const totalCallsNeeded = Math.ceil(totalBytesExpected / maxChunkSize);
+
+        console.log(`[5] MATH VERIFICATION:`);
+        console.log(` -> Formula Run: Math.ceil(${totalBytesExpected} / ${maxChunkSize})`);
+        console.log(` -> Total Calls Needed Allocation: ${totalCallsNeeded}`);
+        console.log(`----------------------------------------------------------------`);
+
         let fileChunks = [];
         let downloadedBytes = 0;
-        let endOfFileReached = false;
-        let chunkCount = 0;
         
-        console.log(`\n=================== [📥 BROWSER STREAM LOG] ===================`);
-        console.log(`Expecting total size: ${totalBytesExpected} bytes.`);
         document.getElementById('status').innerText = "Status: Transferring image over BLE air rails...";
         document.getElementById('progressOuter').style.display = 'block';
 
-        while (downloadedBytes < totalBytesExpected && !endOfFileReached) {
-            const rawChunk = await streamChar.readValue();
-            chunkCount++;
-
-            // Explicit Check for text-based "EOF" flag
-            if (rawChunk.byteLength === 3) {
-                const asciiCheck = decoder.decode(rawChunk);
-                if (asciiCheck === "EOF") {
-                    console.log(` -> Chunk #${chunkCount}: Intercepted literal 'EOF' packet marker text. Closing loop.`);
-                    endOfFileReached = true;
-                    break; 
-                }
-            }
-
-            const chunkArray = new Uint8Array(rawChunk.buffer);
+        // Loop execution with granular iteration print tracing
+        for (let callIndex = 0; callIndex < totalCallsNeeded; callIndex++) {
+            console.log(`\n--- Loop Cycle Iteration Index: #${callIndex} (Call ${callIndex + 1}/${totalCallsNeeded}) ---`);
             
-            // Log the first few bytes of the initial chunks to verify format integrity
-            if (chunkCount <= 2) {
-                let hexStr = "";
-                for(let i=0; i<Math.min(chunkArray.length, 6); i++) {
-                    hexStr += "0x" + chunkArray[i].toString(16).toUpperCase().padStart(2, '0') + " ";
-                }
-                console.log(` -> Chunk #${chunkCount} (${rawChunk.byteLength} bytes) Header bytes: ${hexStr}`);
+            if (callIndex > 0) {
+                const commandPacket = new Uint8Array([parseInt(slot), callIndex]);
+                
+                // Print the raw array bytes Chrome is passing to the Bluetooth stack
+                let packetHexStr = "";
+                commandPacket.forEach(b => packetHexStr += "0x" + b.toString(16).toUpperCase().padStart(2, '0') + " ");
+                console.log(` -> [📦 PRE-FLIGHT OUTBOUND] Preparing 2-byte instruction envelope.`);
+                console.log(`    -> Raw Uint8Array Length: ${commandPacket.length} elements.`);
+                console.log(`    -> Byte array configuration: [ ${packetHexStr}]`);
+                
+                console.log(` -> Executing writeValue()...`);
+                await controlChar.writeValue(commandPacket);
+                console.log(` -> writeValue() complete. Yielding 25ms delay for hardware stabilization...`);
+                await new Promise(resolve => setTimeout(resolve, 25)); 
+            } else {
+                console.log(` -> Skipping outbound command write pass (CallIndex is 0). Reading initial hardware buffer.`);
             }
 
+            console.log(` -> Executing streamChar.readValue()...`);
+            const rawChunk = await streamChar.readValue();
+            
+            // 🌟 UNIVERSAL CORRECTION: Force Chrome to extract the exact slice size
+            // By wrapping rawChunk directly, it uses the precise byteLength boundaries (240 then 114)
+            const chunkArray = new Uint8Array(rawChunk.buffer, rawChunk.byteOffset, rawChunk.byteLength);
+            
+            console.log(` -> readValue() complete. Received packet size: ${rawChunk.byteLength} bytes.`);
+
+            let chunkHexStr = "";
+            for(let i=0; i<Math.min(chunkArray.length, 6); i++) {
+                chunkHexStr += "0x" + chunkArray[i].toString(16).toUpperCase().padStart(2, '0') + " ";
+            }
+            console.log(` -> Received Chunk Frame Header Bytes: [ ${chunkHexStr}]`);
+            
             fileChunks.push(chunkArray);
             downloadedBytes += rawChunk.byteLength;
+            console.log(` -> Running Data Totals: ${downloadedBytes}/${totalBytesExpected} bytes accumulated.`);
 
-            if (totalBytesExpected > 0) {
-                const percent = Math.min(100, Math.floor((downloadedBytes / totalBytesExpected) * 100));
-                document.getElementById('progressInner').style.width = percent + '%';
-                document.getElementById('status').innerText = `Status: Downloading (${downloadedBytes}/${totalBytesExpected} bytes)...`;
-            }
+            // Update local progress bar metrics
+            const percent = Math.min(100, Math.floor((downloadedBytes / totalBytesExpected) * 100));
+            document.getElementById('progressInner').style.width = percent + '%';
+            document.getElementById('status').innerText = `Status: Downloading (${downloadedBytes}/${totalBytesExpected} bytes)...`;
         }
 
-        console.log(`Completed Download. Total raw bytes accumulated: ${downloadedBytes}`);
+        console.log(`\n=================== [📥 TRANSFER CYCLE METRICS] ===================`);
+        console.log(`Total calls processed: ${totalCallsNeeded}`);
+        console.log(`Total raw data accumulated across arrays: ${downloadedBytes} bytes.`);
 
-        // STITCH ALL CHUNKS AND ANALYZE PRE-FLIGHT COMPOSITION HEADERS
         let finalImageBuffer = new Uint8Array(downloadedBytes);
         let currentWriteOffset = 0;
         for (let chunk of fileChunks) {
@@ -175,13 +203,12 @@ document.getElementById('downloadBtn').addEventListener('click', async () => {
             currentWriteOffset += chunk.length;
         }
 
-        // Diagnostic validation of universal file parameters
         let fileHeaderHex = "";
         for(let i=0; i<Math.min(finalImageBuffer.length, 6); i++) {
             fileHeaderHex += "0x" + finalImageBuffer[i].toString(16).toUpperCase().padStart(2, '0') + " ";
         }
-        console.log(` -> COMPOSITE FILE CONTAINER RAW START BYTES: ${fileHeaderHex}`);
-        console.log(`================================================================`);
+        console.log(` -> FINAL CONSOLIDATED PAYLOAD CONTAINER HEADER BYTES: [ ${fileHeaderHex}]`);
+        console.log(`====================================================================`);
 
         document.getElementById('status').innerText = "Status: Rendering photo...";
         const completeBlob = new Blob([finalImageBuffer], { type: 'image/jpeg' });
@@ -189,13 +216,17 @@ document.getElementById('downloadBtn').addEventListener('click', async () => {
 
         document.getElementById('imgContainer').innerHTML = `<img src="${imgUrl}" alt="Garden Offline Capture" />`;
         document.getElementById('status').innerText = "Status: Transfer complete!";
+
     } catch (error) {
-        document.getElementById('status').innerText = "Stream Interrupted: " + error.message;
+        console.error(`\n❌ [STREAM TIMEOUT/EXCEPTION ENCOUNTERED]:`);
         console.error(error);
+        document.getElementById('status').innerText = "Stream Interrupted: " + error.message;
     } finally {
         document.getElementById('downloadBtn').disabled = false;
     }
 });
+</script>
+
 </script>
 </body>
 </html>

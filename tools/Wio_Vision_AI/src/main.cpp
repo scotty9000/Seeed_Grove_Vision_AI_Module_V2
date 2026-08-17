@@ -79,18 +79,18 @@ class ServerCallbacks: public BLEServerCallbacks {
     }
 };
 
-// Handlers for Slot Selection & Stream Chunking with Serial Diagnostics
+// Handlers for Bounded Slot Selection and Stateless Chunk Extraction
 class ControlCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pCharacteristic) {
         std::string rawValue = pCharacteristic->getValue();
         
+        // 🌟 RAW DIAGNOSTIC SCANNER: Fires instantly before ANY if-statements or variables process
         if (Serial) {
-            Serial.println("\n================================================");
-            Serial.print("[📱 BLE WRITE RECEIVED] Packet Raw Length: "); 
+            Serial.println("\n========================================================");
+            Serial.print("[⚙️ HARDWARE INTERCEPT] Incoming packet length: "); 
             Serial.print(rawValue.length()); Serial.println(" bytes.");
             
-            // Print the raw contents in both Hex and character views for deep diagnostics
-            Serial.print(" -> Raw Contents (Hex): ");
+            Serial.print(" -> Byte Contents (Hex): ");
             for(size_t i = 0; i < rawValue.length(); i++) {
                 Serial.print("0x");
                 if((unsigned char)rawValue[i] < 16) Serial.print("0");
@@ -98,86 +98,64 @@ class ControlCallbacks: public BLECharacteristicCallbacks {
                 Serial.print(" ");
             }
             Serial.println();
+            Serial.println("========================================================");
         }
+
+
+
         
         if (rawValue.length() > 0) {
+            // Check if browser sent a 2-byte packet (Byte 0: Slot choice, Byte 1: Requested Packet Number)
+            if (rawValue.length() == 2) {
+                int requestedSlot = (unsigned char)rawValue[0];
+                int requestedPacket = (unsigned char)rawValue[1];
+                
+                if (requestedSlot >= 0 && requestedSlot < BUFFER_SLOTS) {
+                    selectedSlot = requestedSlot;
+                    
+                    uint32_t totalLen = imageLengths[selectedSlot];
+                    uint32_t targetOffset = requestedPacket * 240;
+                    
+                    if (targetOffset < totalLen) {
+                        uint32_t remaining = totalLen - targetOffset;
+                        uint32_t chunkLen = (remaining > 240) ? 240 : remaining;
+                        
+                        // Extract the exact binary row index memory pointer offset address natively
+                        uint8_t* pChunkAddress = (uint8_t*)&imageRingBuffer[selectedSlot][targetOffset];
+                        pDataStreamChar->setValue(pChunkAddress, chunkLen);
+                        
+                        if (Serial) {
+                            Serial.print("[📥 BLE TRACK] Handed Browser Call #"); Serial.print(requestedPacket);
+                            Serial.print(" | Slot: "); Serial.print(selectedSlot);
+                            Serial.print(" | Size: "); Serial.print(chunkLen);
+                            Serial.print(" bytes from offset: "); Serial.println(targetOffset);
+                        }
+                    } else {
+                        pDataStreamChar->setValue((uint8_t*)"EOF", 3);
+                    }
+                }
+                return; // Exit out of the packet index handler safely
+            }
+            
+            // Standard single-byte setup gate (Used during initial connection initialization)
             char slotChar = rawValue[0]; 
-            int requestedSlot = -1; // Initialize with an explicit error flag
-            
-            // 🌟 THE UNIVERSAL DECODER: Auto-detects raw binary numbers or text strings
-            if ((unsigned char)slotChar < 4) {
-                requestedSlot = (int)slotChar; // Handles raw bytes (0x00, 0x01, 0x02, 0x03)
-            } else {
-                requestedSlot = slotChar - '0'; // Handles ASCII text characters ('0', '1', '2', '3')
-            }
-            
-            if (Serial) {
-                Serial.print(" -> Target Parsed Character: '"); Serial.print(slotChar); Serial.println("'");
-                Serial.print(" -> Evaluated Math Slot Index: "); Serial.println(requestedSlot);
-            }
-
+            int requestedSlot = ((unsigned char)slotChar < 4) ? (int)slotChar : (slotChar - '0');
             
             if (requestedSlot >= 0 && requestedSlot < BUFFER_SLOTS) {
                 selectedSlot = requestedSlot;
-                currentOffset = 0; // Reset chunk pointer to the beginning of the new picture
                 
-                // Dynamically update your phone view with what target is saved inside that slot
                 String meta = "Slot [" + String(selectedSlot) + "] Meta: " + imageMetadata[selectedSlot] + " | Length: " + String(imageLengths[selectedSlot]) + " bytes";
                 pMetadataChar->setValue(meta.c_str());
                 pMetadataChar->notify();
-
-                // Prime the first 240 bytes of raw data inside the stream register
+                
+                // Pre-load Call #0 data bytes straight into the stream register out of the gate
                 uint32_t totalLen = imageLengths[selectedSlot];
                 uint32_t chunkLen = (totalLen > 240) ? 240 : totalLen;
                 if (totalLen > 0) {
-                    pDataStreamChar->setValue((uint8_t*)&imageRingBuffer[selectedSlot], chunkLen);
-                    currentOffset += chunkLen;
+                    pDataStreamChar->setValue((uint8_t*)&imageRingBuffer[selectedSlot][0], chunkLen);
                 } else {
-                    pDataStreamChar->setValue("No Data");
+                    pDataStreamChar->setValue((uint8_t*)"No Data", 7);
                 }
-                
-                if (Serial) {
-                    Serial.println(" [SUCCESS] Memory pointers successfully shifted to target slot.");
-                    Serial.print(" -> Broadcaster metadata updated: "); Serial.println(meta);
-                    Serial.println("================================================");
-                }
-            } else {
-                if (Serial) {
-                    Serial.println(" [❌ BOUNDS REJECTION] Requested index falls outside safe 0-3 buffer limits.");
-                    Serial.println("================================================");
-                }
-            }
-        }
-    }
-
-    void onRead(BLECharacteristic* pCharacteristic) {
-        uint32_t totalLen = imageLengths[selectedSlot];
-        
-        if (Serial) {
-            Serial.println("\n------------------------------------------------");
-            Serial.print("[📤 BLE READ REQUEST] Phone querying Data Stream for Slot [");
-            Serial.print(selectedSlot); Serial.println("]");
-        }
-
-        if (currentOffset < totalLen) {
-            uint32_t remaining = totalLen - currentOffset;
-            uint32_t chunkLen = (remaining > 240) ? 240 : remaining;
-            
-            pDataStreamChar->setValue((uint8_t*)&imageRingBuffer[selectedSlot][currentOffset], chunkLen);
-            currentOffset += chunkLen;
-            
-            if (Serial) {
-                Serial.print(" -> Shifting Window. Transmitted Chunk: "); Serial.print(chunkLen); Serial.println(" bytes.");
-                Serial.print(" -> Direct Pointer Progress: "); Serial.print(currentOffset);
-                Serial.print("/"); Serial.print(totalLen); Serial.println(" total bytes delivered.");
-                Serial.println("------------------------------------------------");
-            }
-        } else {
-            pDataStreamChar->setValue("EOF");
-            if (Serial) {
-                Serial.println(" -> Reached End of File buffer boundary.");
-                Serial.println(" -> Piped 'EOF' text flag signature down transmission rails.");
-                Serial.println("------------------------------------------------");
             }
         }
     }

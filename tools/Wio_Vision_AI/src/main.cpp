@@ -49,12 +49,44 @@ class ServerCallbacks: public BLEServerCallbacks {
     }
 };
 
-// Handlers for Slot Selection & Stream Chunking
+// Handlers for Slot Selection & Stream Chunking with Serial Diagnostics
 class ControlCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pCharacteristic) {
         std::string rawValue = pCharacteristic->getValue();
+        
+        if (Serial) {
+            Serial.println("\n================================================");
+            Serial.print("[📱 BLE WRITE RECEIVED] Packet Raw Length: "); 
+            Serial.print(rawValue.length()); Serial.println(" bytes.");
+            
+            // Print the raw contents in both Hex and character views for deep diagnostics
+            Serial.print(" -> Raw Contents (Hex): ");
+            for(size_t i = 0; i < rawValue.length(); i++) {
+                Serial.print("0x");
+                if((unsigned char)rawValue[i] < 16) Serial.print("0");
+                Serial.print((unsigned char)rawValue[i], HEX);
+                Serial.print(" ");
+            }
+            Serial.println();
+        }
+        
         if (rawValue.length() > 0) {
-            int requestedSlot = rawValue[0] - '0'; // Convert ASCII char digit to literal int
+            char slotChar = rawValue[0]; 
+            int requestedSlot = -1; // Initialize with an explicit error flag
+            
+            // 🌟 THE UNIVERSAL DECODER: Auto-detects raw binary numbers or text strings
+            if ((unsigned char)slotChar < 4) {
+                requestedSlot = (int)slotChar; // Handles raw bytes (0x00, 0x01, 0x02, 0x03)
+            } else {
+                requestedSlot = slotChar - '0'; // Handles ASCII text characters ('0', '1', '2', '3')
+            }
+            
+            if (Serial) {
+                Serial.print(" -> Target Parsed Character: '"); Serial.print(slotChar); Serial.println("'");
+                Serial.print(" -> Evaluated Math Slot Index: "); Serial.println(requestedSlot);
+            }
+
+            
             if (requestedSlot >= 0 && requestedSlot < BUFFER_SLOTS) {
                 selectedSlot = requestedSlot;
                 currentOffset = 0; // Reset chunk pointer to the beginning of the new picture
@@ -68,38 +100,55 @@ class ControlCallbacks: public BLECharacteristicCallbacks {
                 uint32_t totalLen = imageLengths[selectedSlot];
                 uint32_t chunkLen = (totalLen > 240) ? 240 : totalLen;
                 if (totalLen > 0) {
-                    pDataStreamChar->setValue(&imageRingBuffer[selectedSlot][0], chunkLen);
+                    pDataStreamChar->setValue((uint8_t*)&imageRingBuffer[selectedSlot], chunkLen);
                     currentOffset += chunkLen;
                 } else {
                     pDataStreamChar->setValue("No Data");
                 }
                 
                 if (Serial) {
-                    Serial.print("[🎯 BLE CONTROL] Phone selected Slot: "); Serial.print(selectedSlot);
-                    Serial.print(" | Meta parsed: "); Serial.println(imageMetadata[selectedSlot]);
+                    Serial.println(" [SUCCESS] Memory pointers successfully shifted to target slot.");
+                    Serial.print(" -> Broadcaster metadata updated: "); Serial.println(meta);
+                    Serial.println("================================================");
+                }
+            } else {
+                if (Serial) {
+                    Serial.println(" [❌ BOUNDS REJECTION] Requested index falls outside safe 0-3 buffer limits.");
+                    Serial.println("================================================");
                 }
             }
         }
     }
 
     void onRead(BLECharacteristic* pCharacteristic) {
-        // When your phone reads Characteristic 2 (Data Chunker), automatically advance 
-        // forward to package the NEXT sequential 240-byte slice of the image
         uint32_t totalLen = imageLengths[selectedSlot];
+        
+        if (Serial) {
+            Serial.println("\n------------------------------------------------");
+            Serial.print("[📤 BLE READ REQUEST] Phone querying Data Stream for Slot [");
+            Serial.print(selectedSlot); Serial.println("]");
+        }
+
         if (currentOffset < totalLen) {
             uint32_t remaining = totalLen - currentOffset;
             uint32_t chunkLen = (remaining > 240) ? 240 : remaining;
             
-            pDataStreamChar->setValue(&imageRingBuffer[selectedSlot][currentOffset], chunkLen);
+            pDataStreamChar->setValue((uint8_t*)&imageRingBuffer[selectedSlot][currentOffset], chunkLen);
             currentOffset += chunkLen;
             
             if (Serial) {
-                Serial.print("[📤 BLE STREAM] Piped chunk offset: "); Serial.print(currentOffset);
-                Serial.print("/"); Serial.print(totalLen); Serial.println(" bytes down the air rails.");
+                Serial.print(" -> Shifting Window. Transmitted Chunk: "); Serial.print(chunkLen); Serial.println(" bytes.");
+                Serial.print(" -> Direct Pointer Progress: "); Serial.print(currentOffset);
+                Serial.print("/"); Serial.print(totalLen); Serial.println(" total bytes delivered.");
+                Serial.println("------------------------------------------------");
             }
         } else {
-            // End of File marker signature to signal your terminal app that the JPEG is finished
             pDataStreamChar->setValue("EOF");
+            if (Serial) {
+                Serial.println(" -> Reached End of File buffer boundary.");
+                Serial.println(" -> Piped 'EOF' text flag signature down transmission rails.");
+                Serial.println("------------------------------------------------");
+            }
         }
     }
 };
@@ -143,7 +192,7 @@ void setup() {
     delay(500);
 
     // 🌟 INITIATE SECURE STANDALONE BLE CONTROLLER
-    BLEDevice::init("XIAO-GARDEN-CAM");
+    BLEDevice::init("GC-BLE");
     
     // Configure local radio layers for optimal transmission
     BLEDevice::setPower(ESP_PWR_LVL_P9); // Fire radio at full strength for garden range penetration

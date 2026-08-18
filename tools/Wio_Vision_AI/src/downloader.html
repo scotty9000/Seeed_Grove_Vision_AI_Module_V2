@@ -42,6 +42,9 @@
     </div>
 
     <div id="status">Status: Disconnected</div>
+    <div id="globalCounter" style="margin: 15px 0; color: #1e3a8a; font-weight: 700; background: #dbeafe; padding: 12px; border-radius: 8px; border: 1px solid #bfdbfe; display: none; font-size: 15px;">
+        Matches Detected: 0
+    </div>
     <div id="metadata"></div>
     <div class="progress-bar" id="progressOuter"><div class="progress-fill" id="progressInner"></div></div>
     <div id="imgContainer"></div>
@@ -58,6 +61,7 @@ let gattServer = null;
 let controlChar = null;
 let metaChar = null;
 let streamChar = null;
+let counterChar = null;
 
 // STEP A: Handle Core Bluetooth Device Connection
 document.getElementById('connectBtn').addEventListener('click', async () => {
@@ -77,6 +81,29 @@ document.getElementById('connectBtn').addEventListener('click', async () => {
         controlChar = await service.getCharacteristic(CONTROL_CHAR_UUID);
         metaChar = await service.getCharacteristic(META_CHAR_UUID);
         streamChar = await service.getCharacteristic(STREAM_CHAR_UUID);
+        counterChar = await service.getCharacteristic("d8a1c322-1f45-4e7d-8700-d5382c474d21");
+
+        const initialCounterVal = await counterChar.readValue();
+        const initialMatches = initialCounterVal.getUint32(0, true);
+        document.getElementById('globalCounter').innerText = `TOTAL MATCHES: ${initialMatches}`;
+        document.getElementById('globalCounter').style.display = 'block';
+
+        // 🌟 THE FIX: Yield a brief 50ms breathing window for the C3 radio to clear its queue
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        // LIVE AUTO-UPDATE ENGINE (Listens to the air rails in real-time)
+        const handleLiveCounterUpdate = (event) => {
+            const rawVal = event.target.value;
+            const liveMatches = rawVal.getUint32(0, true);
+            
+            // Instantly increments your phone screen banner layout alongside your serial feed!
+            document.getElementById('globalCounter').innerText = `📊 TOTAL GARDEN MATCHES: ${liveMatches}`;
+            console.log(`[LIVE ALERT] Match Counter Auto-Incremented to: ${liveMatches}`);
+        };
+
+        // Bind the background hardware listener to the counter channel
+        await counterChar.startNotifications();
+        counterChar.addEventListener('characteristicvaluechanged', handleLiveCounterUpdate);
 
         document.getElementById('status').innerText = "Status: Connected and ready!";
         document.getElementById('connectBtn').style.display = 'none';
@@ -103,7 +130,7 @@ document.getElementById('downloadBtn').addEventListener('click', async () => {
         // Send initial single slot selection byte
         const slotByte = new Uint8Array([parseInt(slot)]);
         console.log(`[2] Sending Initial Slot Configuration Byte: [0x${slotByte[0].toString(16).toUpperCase().padStart(2, '0')}]`);
-        await controlChar.writeValue(slotByte);
+        await controlChar.writeValueWithResponse(slotByte);
         
         console.log(`[3] Pausing 400ms for hardware pointer alignment...`);
         await new Promise(resolve => setTimeout(resolve, 400)); 
@@ -113,6 +140,7 @@ document.getElementById('downloadBtn').addEventListener('click', async () => {
         const metaVal = await metaChar.readValue();
         const decoder = new TextDecoder();
         const metaText = decoder.decode(metaVal);
+
         console.log(` -> Raw Metadata Received String: "${metaText}"`);
         document.getElementById('metadata').innerText = metaText;
         document.getElementById('metadata').style.display = 'block';
@@ -242,6 +270,7 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
         
         // Write 'C' to your existing Control Characteristic terminal link
         await controlChar.writeValueWithResponse(clearCommand);
+        document.getElementById('globalCounter').innerText = "TOTAL MATCHES: 0";
         
         // Brief pause to let C3 variable tables clear out and settle
         await new Promise(resolve => setTimeout(resolve, 300));
@@ -267,8 +296,3 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
 </body>
 </html>
 
-</script>
-
-</script>
-</body>
-</html>

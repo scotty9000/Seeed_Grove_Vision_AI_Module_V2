@@ -52,11 +52,16 @@ int selectedSlot = 0;    // Tracks which slot your phone app wants to read
 uint32_t currentOffset = 0; // Tracks data chunk position during transmission
 
 
+
 // BLE REWRITE SERVICE & CHARACTERISTIC AUTO-GENERATION UUIDS
 #define SERVICE_UUID           "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define METADATA_CHAR_UUID     "beb5483e-36e1-4688-b7f5-ea07361b26a8" // Read Only
 #define CONTROL_CHAR_UUID      "e3223119-9445-4e7d-8700-d5382c474d21" // Read/Write
 #define DATA_STREAM_CHAR_UUID  "622a5785-5ee6-4e58-9cf8-6628fb05cf71" // Read Only
+#define COUNTER_CHAR_UUID      "d8a1c322-1f45-4e7d-8700-d5382c474d21"
+BLECharacteristic* pCounterChar = nullptr;
+uint32_t totalMatchCounter = 0; 
+
 
 BLEServer* pServer = NULL;
 BLECharacteristic* pMetadataChar = NULL;
@@ -113,9 +118,11 @@ class ControlCallbacks: public BLECharacteristicCallbacks {
                     imageMetadata[i] = "Empty Slot (Wiped)";
                 }
                 writeIndex = 0; // Rewind the camera's injection pointer back to the beginning
+                totalMatchCounter = 0; 
+                pCounterChar->setValue((uint8_t*)&totalMatchCounter, 4);
+                pCounterChar->notify();
                 
-                // Push an instant status update down your phone display line
-                pMetadataChar->setValue("All Memory Slots Cleared Successfully.");
+                pMetadataChar->setValue("Memory Cleared. Counter Reset.");
                 pMetadataChar->notify();
                 
                 if (Serial) {
@@ -165,7 +172,11 @@ class ControlCallbacks: public BLECharacteristicCallbacks {
             if (requestedSlot >= 0 && requestedSlot < BUFFER_SLOTS) {
                 selectedSlot = requestedSlot;
                 
-                String meta = "Slot [" + String(selectedSlot) + "] Meta: " + imageMetadata[selectedSlot] + " | Length: " + String(imageLengths[selectedSlot]) + " bytes";
+                // 🌟 GLOBAL FIXED LAYOUT: Keeps slot memory pure, but updates your phone 
+                // with the live overall device trip counter right at the front of the text line!
+                String meta = "Slot [" + String(selectedSlot) + "] Meta: " + imageMetadata[selectedSlot] + 
+                             " | Length: " + String(imageLengths[selectedSlot]) + " bytes";
+                             
                 pMetadataChar->setValue(meta.c_str());
                 pMetadataChar->notify();
                 
@@ -254,6 +265,16 @@ void setup() {
                         BLECharacteristic::PROPERTY_READ
                       );
 
+    // Initialize the independent counter channel
+    pCounterChar = pService->createCharacteristic(
+        COUNTER_CHAR_UUID,
+        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+    );
+    
+    // Set the initial boot value to 0 (Passed as a raw 4-byte pointer array structure)
+    pCounterChar->setValue((uint8_t*)&totalMatchCounter, 4);
+
+
     // Launch background services
     pService->start();
 
@@ -331,19 +352,17 @@ void loop() {
             int confidence = AI.boxes()[0].score;
 
             if (confidence > 60) {
-                
-                // ENGAGE ANTI-FLOOD TIMER IMMEDIATELY
+                // Engage anti-flood lockout timers...
                 lockoutTimerStart = currentMillis; 
                 isLockoutActive = true; 
 
-                // Remap the incoming data index for the Person YOLO model
-                String targetName = "";
-                if (currentID == 0) {
-                    targetName = "PERSON"; 
-                } else {
-                    targetName = "UNKNOWN"; 
-                }
+                totalMatchCounter++;
+                // PUSH NEW VALUE INSTANTLY: Pipes the raw 4-byte integer straight down the air rails
+                pCounterChar->setValue((uint8_t*)&totalMatchCounter, 4);
+                pCounterChar->notify();
 
+                String targetName = (currentID == 0) ? "PERSON" : "UNKNOWN";
+  
                 if (Serial) {
                     Serial.println("\n================================================");
                     Serial.print("[TARGET DETECTED] Valid Match: "); Serial.println(targetName);

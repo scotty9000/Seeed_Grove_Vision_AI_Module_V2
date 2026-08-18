@@ -12,7 +12,7 @@ SSCMA AI;
 #define TEST_IMAGE_SIZE 354
 
 // 🌟 TEST SUITE: Standard 16x16 pixel bright red square JPEG file layout profile
-const uint8_t PROGMEM testRedSquare16x16[TEST_IMAGE_SIZE] = {
+const uint8_t PROGMEM testBlackSpot16x16[TEST_IMAGE_SIZE] = {
   0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00, 0x48,
   0x00, 0x48, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0x03, 0x02, 0x02, 0x03, 0x02, 0x02, 0x03,
   0x03, 0x03, 0x03, 0x04, 0x03, 0x03, 0x04, 0x05, 0x08, 0x05, 0x05, 0x04, 0x04, 0x05, 0x0A, 0x07,
@@ -64,6 +64,7 @@ BLECharacteristic* pControlChar = NULL;
 BLECharacteristic* pDataStreamChar = NULL;
 bool deviceConnected = false;
 
+
 void storeImageInRingBuffer(const String& base64Str, const String& labelName, int confidence);
 
 class ServerCallbacks: public BLEServerCallbacks {
@@ -100,11 +101,32 @@ class ControlCallbacks: public BLECharacteristicCallbacks {
             Serial.println();
             Serial.println("========================================================");
         }
-
-
-
         
         if (rawValue.length() > 0) {
+            char slotChar = rawValue[0]; // Intercept the primary action character
+            
+            // 🌟 THE CLEAR ALL COMMAND ENGINE
+            // Triggers if you send the character 'C' (ASCII 67) or raw machine byte 0x43
+            if (slotChar == 'C' || slotChar == 67) {
+                for (int i = 0; i < BUFFER_SLOTS; i++) {
+                    imageLengths[i] = 0; // Resetting size registers to 0 declares them "empty"
+                    imageMetadata[i] = "Empty Slot (Wiped)";
+                }
+                writeIndex = 0; // Rewind the camera's injection pointer back to the beginning
+                
+                // Push an instant status update down your phone display line
+                pMetadataChar->setValue("All Memory Slots Cleared Successfully.");
+                pMetadataChar->notify();
+                
+                if (Serial) {
+                    Serial.println("\n================================================");
+                    Serial.println("[🧹 MEMORY CLEAR] Wiped all 4 static SRAM slots.");
+                    Serial.println(" -> System counters and writeIndex reset to zero.");
+                    Serial.println("================================================");
+                }
+                return; // Exit function early after successful flush execution
+            }
+
             // Check if browser sent a 2-byte packet (Byte 0: Slot choice, Byte 1: Requested Packet Number)
             if (rawValue.length() == 2) {
                 int requestedSlot = (unsigned char)rawValue[0];
@@ -138,7 +160,6 @@ class ControlCallbacks: public BLECharacteristicCallbacks {
             }
             
             // Standard single-byte setup gate (Used during initial connection initialization)
-            char slotChar = rawValue[0]; 
             int requestedSlot = ((unsigned char)slotChar < 4) ? (int)slotChar : (slotChar - '0');
             
             if (requestedSlot >= 0 && requestedSlot < BUFFER_SLOTS) {
@@ -174,6 +195,7 @@ bool isLockoutActive = false;
 // FIXED TIME-LAPSE TELEMETRY INTERVAL
 unsigned long lastTelemetryTime = 0;
 const unsigned long telemetryInterval = 60000; // Sent exactly every 60 seconds (1 minute)
+
 void setup() {
     Serial.begin(115200);
     
@@ -250,8 +272,8 @@ void setup() {
         Serial.println("================================================");
     }
 
-    // 🌟 TEST INJECTION: Permanently lock the 270-byte red square into Slot 0 memory grids
-    memcpy(imageRingBuffer[0], testRedSquare16x16, TEST_IMAGE_SIZE);
+    // TEST INJECTION: Permanently lock the 270-byte red square into Slot 0
+    memcpy(imageRingBuffer[0], testBlackSpot16x16, TEST_IMAGE_SIZE);
     imageLengths[0] = TEST_IMAGE_SIZE;
     imageMetadata[0] = "Target: RED_SQUARE_TEST (100%) | Length: 354 bytes";
     
@@ -261,12 +283,10 @@ void setup() {
     
     if (Serial) {
         Serial.println("===============================================================");
-        Serial.println("[🧪 SUITE ENGAGED] 354-Byte 16x16 Red Square loaded into Slot 0.");
-        Serial.println("[🛡️ PROTECTION] AI model redirected to store live frames in Slot 1.");
+        Serial.println("[TEST IMAGE] 354-Byte 16x16 Black Spot loaded into Slot 0.");
+        Serial.println(" AI model redirected to store live frames in Slot 1.");
         Serial.println("===============================================================");
     }
-
-
 }
 
 
@@ -275,7 +295,7 @@ void loop() {
 
     // ⏱️ AUTOMATIC ANTI-FLOOD LOCKOUT RELEASE CHECKER
     if (isLockoutActive && (currentMillis - lockoutTimerStart >= ANTI_FLOOD_INTERVAL)) {
-        if (Serial) Serial.println("\n[⏱️ LOCKOUT SYSTEM] Cooldown window expired. Buffers ready for next target.");
+        if (Serial) Serial.println("\n[LOCKOUT SYSTEM] Cooldown window expired. Buffers ready for next target.");
         isLockoutActive = false;
     }
 
@@ -299,7 +319,7 @@ void loop() {
 
         if (status < 0) {
             if (Serial) {
-                Serial.print("\n[❌ I2C ERROR] Camera bus read failed. Status: ");
+                Serial.print("\n[I2C ERROR] Camera bus read failed. Status: ");
                 Serial.println(status);
             }
             return; 
@@ -326,8 +346,8 @@ void loop() {
 
                 if (Serial) {
                     Serial.println("\n================================================");
-                    Serial.print("[🚀 TARGET DETECTED] Valid Match: "); Serial.println(targetName);
-                    Serial.print("[🚀 TARGET DETECTED] Confidence: "); Serial.print(confidence); Serial.println("%");
+                    Serial.print("[TARGET DETECTED] Valid Match: "); Serial.println(targetName);
+                    Serial.print("[TARGET DETECTED] Confidence: "); Serial.print(confidence); Serial.println("%");
                     Serial.println("================================================");
                 }
 
@@ -344,8 +364,6 @@ void loop() {
     }
 }
 
-
-
 void storeImageInRingBuffer(const String& base64Str, const String& labelName, int confidence) {
     if (base64Str.length() == 0) {
         if (Serial) Serial.println("[⚠️ DIAGNOSTIC] Base64 string is entirely empty!");
@@ -353,7 +371,7 @@ void storeImageInRingBuffer(const String& base64Str, const String& labelName, in
     }
 
     if (Serial) {
-        Serial.println("\n=================== [📷 STORAGE DIAGNOSTICS] ===================");
+        Serial.println("\n=================== [STORAGE DIAGNOSTICS] ===================");
         Serial.print(" -> Raw Base64 String Character Length: "); Serial.println(base64Str.length());
         Serial.print(" -> Front Base64 Characters: ");
         for (int i = 0; i < min((int)base64Str.length(), 15); i++) {
@@ -375,7 +393,7 @@ void storeImageInRingBuffer(const String& base64Str, const String& labelName, in
 
     if (decodeStatus != 0) {
         if (Serial) {
-            Serial.print(" -> [❌ DECODE ERROR] mbedtls_base64_decode failed! Code: ");
+            Serial.print(" -> [DECODE ERROR] mbedtls_base64_decode failed! Code: ");
             Serial.println(decodeStatus);
             Serial.println("===============================================================");
         }
@@ -387,7 +405,7 @@ void storeImageInRingBuffer(const String& base64Str, const String& labelName, in
     imageMetadata[writeIndex] = "Target: " + labelName + " (" + String(confidence) + "%)";
 
     if (Serial) {
-        Serial.print(" -> [💾 MEMORY OK] Stored binary array row inside Slot ["); Serial.print(writeIndex); Serial.println("]");
+        Serial.print(" -> [MEMORY OK] Stored binary array row inside Slot ["); Serial.print(writeIndex); Serial.println("]");
         Serial.print(" -> Decoded Binary Output Length: "); Serial.print(actualBinaryLen); Serial.println(" bytes.");
         Serial.print(" -> First 6 Decoded Bytes (Hex): ");
         for (size_t i = 0; i < min((size_t)actualBinaryLen, (size_t)6); i++) {

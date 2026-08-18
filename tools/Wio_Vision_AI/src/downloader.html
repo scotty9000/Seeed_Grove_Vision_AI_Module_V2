@@ -31,12 +31,14 @@
     <div id="controls" style="display:none;">
         <label for="slotSelect" style="display:block; text-align:left; font-size:14px; font-weight:600; color: #475569; margin-bottom: 5px;">Select Memory Slot:</label>
         <select id="slotSelect">
-            <option value="0">Slot 0 (Oldest Image)</option>
+            <option value="0">Slot 0</option>
             <option value="1">Slot 1</option>
             <option value="2">Slot 2</option>
-            <option value="3">Slot 3 (Newest Image)</option>
+            <option value="3">Slot 3</option>
         </select>
         <button id="downloadBtn">2. Download & Render Image</button>
+        <button id="clearBtn" style="background: #dc2626; margin-top: 5px;">🧹 Clear All Slots</button>
+
     </div>
 
     <div id="status">Status: Disconnected</div>
@@ -225,6 +227,46 @@ document.getElementById('downloadBtn').addEventListener('click', async () => {
         document.getElementById('downloadBtn').disabled = false;
     }
 });
+
+// STEP C: Handshake to Wipe Device Memory
+document.getElementById('clearBtn').addEventListener('click', async () => {
+    if (!confirm("Are you sure you want to erase all 4 slots in the garden camera?")) return;
+    
+    document.getElementById('status').innerText = "Status: Executing memory wipe command...";
+    document.getElementById('clearBtn').disabled = true;
+    document.getElementById('metadata').style.display = 'none';
+
+    try {
+        const encoder = new TextEncoder();
+        const clearCommand = encoder.encode('C');
+        
+        // Write 'C' to your existing Control Characteristic terminal link
+        await controlChar.writeValueWithResponse(clearCommand);
+        
+        // Brief pause to let C3 variable tables clear out and settle
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        // Read back the fresh confirmation string from the metadata tracker
+        const metaVal = await metaChar.readValue();
+        const decoder = new TextDecoder();
+        
+        document.getElementById('metadata').innerText = decoder.decode(metaVal);
+        document.getElementById('metadata').style.display = 'block';
+        document.getElementById('status').innerText = "Status: Memory clear complete.";
+        document.getElementById('imgContainer').innerHTML = ""; // Wipe current photo from view
+    } catch (error) {
+        document.getElementById('status').innerText = "Wipe Failed: " + error.message;
+        console.error(error);
+    } finally {
+        document.getElementById('clearBtn').disabled = false;
+    }
+});
+
+
+</script> 
+</body>
+</html>
+
 </script>
 
 </script>

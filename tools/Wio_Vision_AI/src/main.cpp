@@ -221,6 +221,10 @@ void setup() {
         Serial.println("================================================");
     }
 
+    // 🌟 BATTERY REGULATOR WINDOW: Gives your step-down SMPS module a brief 
+    // moment to completely stabilize voltage rails before probing the bus
+    delay(1000);
+
     // Initialize I2C layers cleanly
     Wire.begin(6, 7); 
     Wire.setClock(400000); 
@@ -232,7 +236,7 @@ void setup() {
     if (Serial) Serial.println("[SUCCESS] Camera board online over I2C.");
     delay(500);
 
-    // 🌟 INITIATE SECURE STANDALONE BLE CONTROLLER
+    // INITIATE SECURE STANDALONE BLE CONTROLLER
     BLEDevice::init("GC-BLE");
     
     // Configure local radio layers for optimal transmission
@@ -271,12 +275,16 @@ void setup() {
         BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
     );
     
+    // 🌟 THE MISSING SUB-REGISTER: Inject the mandatory 2902 subscription descriptor container!
+    // This explicitly gives Chrome the physical address space it needs to hook up background alerts.
+    pCounterChar->addDescriptor(new BLE2902()); 
+    
     // Set the initial boot value to 0 (Passed as a raw 4-byte pointer array structure)
     pCounterChar->setValue((uint8_t*)&totalMatchCounter, 4);
 
-
     // Launch background services
     pService->start();
+
 
     // Configure Advertising wrapper so your phone can find the device offline
     BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();

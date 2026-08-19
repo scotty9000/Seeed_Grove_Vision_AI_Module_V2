@@ -11,7 +11,7 @@ SSCMA AI;
 
 #define TEST_IMAGE_SIZE 354
 
-// 🌟 TEST SUITE: Standard 16x16 pixel bright red square JPEG file layout profile
+// 🌟 TEST SUITE: Standard 16x16 pixel BlackSpot file layout profile
 const uint8_t PROGMEM testBlackSpot16x16[TEST_IMAGE_SIZE] = {
   0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00, 0x48,
   0x00, 0x48, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0x03, 0x02, 0x02, 0x03, 0x02, 0x02, 0x03,
@@ -60,7 +60,7 @@ uint32_t currentOffset = 0; // Tracks data chunk position during transmission
 #define DATA_STREAM_CHAR_UUID  "622a5785-5ee6-4e58-9cf8-6628fb05cf71" // Read Only
 #define COUNTER_CHAR_UUID      "d8a1c322-1f45-4e7d-8700-d5382c474d21"
 BLECharacteristic* pCounterChar = nullptr;
-uint32_t totalMatchCounter = 0; 
+uint32_t totalMatchCounter = 0;
 
 
 BLEServer* pServer = NULL;
@@ -89,13 +89,13 @@ class ServerCallbacks: public BLEServerCallbacks {
 class ControlCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pCharacteristic) {
         std::string rawValue = pCharacteristic->getValue();
-        
+
         // 🌟 RAW DIAGNOSTIC SCANNER: Fires instantly before ANY if-statements or variables process
         if (Serial) {
             Serial.println("\n========================================================");
-            Serial.print("[⚙️ HARDWARE INTERCEPT] Incoming packet length: "); 
+            Serial.print("[⚙️ HARDWARE INTERCEPT] Incoming packet length: ");
             Serial.print(rawValue.length()); Serial.println(" bytes.");
-            
+
             Serial.print(" -> Byte Contents (Hex): ");
             for(size_t i = 0; i < rawValue.length(); i++) {
                 Serial.print("0x");
@@ -106,10 +106,10 @@ class ControlCallbacks: public BLECharacteristicCallbacks {
             Serial.println();
             Serial.println("========================================================");
         }
-        
+
         if (rawValue.length() > 0) {
             char slotChar = rawValue[0]; // Intercept the primary action character
-            
+
             // 🌟 THE CLEAR ALL COMMAND ENGINE
             // Triggers if you send the character 'C' (ASCII 67) or raw machine byte 0x43
             if (slotChar == 'C' || slotChar == 67) {
@@ -118,13 +118,13 @@ class ControlCallbacks: public BLECharacteristicCallbacks {
                     imageMetadata[i] = "Empty Slot (Wiped)";
                 }
                 writeIndex = 0; // Rewind the camera's injection pointer back to the beginning
-                totalMatchCounter = 0; 
+                totalMatchCounter = 0;
                 pCounterChar->setValue((uint8_t*)&totalMatchCounter, 4);
                 pCounterChar->notify();
-                
+
                 pMetadataChar->setValue("Memory Cleared. Counter Reset.");
                 pMetadataChar->notify();
-                
+
                 if (Serial) {
                     Serial.println("\n================================================");
                     Serial.println("[🧹 MEMORY CLEAR] Wiped all 4 static SRAM slots.");
@@ -138,21 +138,21 @@ class ControlCallbacks: public BLECharacteristicCallbacks {
             if (rawValue.length() == 2) {
                 int requestedSlot = (unsigned char)rawValue[0];
                 int requestedPacket = (unsigned char)rawValue[1];
-                
+
                 if (requestedSlot >= 0 && requestedSlot < BUFFER_SLOTS) {
                     selectedSlot = requestedSlot;
-                    
+
                     uint32_t totalLen = imageLengths[selectedSlot];
                     uint32_t targetOffset = requestedPacket * 240;
-                    
+
                     if (targetOffset < totalLen) {
                         uint32_t remaining = totalLen - targetOffset;
                         uint32_t chunkLen = (remaining > 240) ? 240 : remaining;
-                        
+
                         // Extract the exact binary row index memory pointer offset address natively
                         uint8_t* pChunkAddress = (uint8_t*)&imageRingBuffer[selectedSlot][targetOffset];
                         pDataStreamChar->setValue(pChunkAddress, chunkLen);
-                        
+
                         if (Serial) {
                             Serial.print("[📥 BLE TRACK] Handed Browser Call #"); Serial.print(requestedPacket);
                             Serial.print(" | Slot: "); Serial.print(selectedSlot);
@@ -165,21 +165,21 @@ class ControlCallbacks: public BLECharacteristicCallbacks {
                 }
                 return; // Exit out of the packet index handler safely
             }
-            
+
             // Standard single-byte setup gate (Used during initial connection initialization)
             int requestedSlot = ((unsigned char)slotChar < 4) ? (int)slotChar : (slotChar - '0');
-            
+
             if (requestedSlot >= 0 && requestedSlot < BUFFER_SLOTS) {
                 selectedSlot = requestedSlot;
-                
-                // 🌟 GLOBAL FIXED LAYOUT: Keeps slot memory pure, but updates your phone 
+
+                // 🌟 GLOBAL FIXED LAYOUT: Keeps slot memory pure, but updates your phone
                 // with the live overall device trip counter right at the front of the text line!
-                String meta = "Slot [" + String(selectedSlot) + "] Meta: " + imageMetadata[selectedSlot] + 
+                String meta = "Slot [" + String(selectedSlot) + "] Meta: " + imageMetadata[selectedSlot] +
                              " | Length: " + String(imageLengths[selectedSlot]) + " bytes";
-                             
+
                 pMetadataChar->setValue(meta.c_str());
                 pMetadataChar->notify();
-                
+
                 // Pre-load Call #0 data bytes straight into the stream register out of the gate
                 uint32_t totalLen = imageLengths[selectedSlot];
                 uint32_t chunkLen = (totalLen > 240) ? 240 : totalLen;
@@ -199,9 +199,9 @@ const unsigned long checkInterval = 200; // Snappy 200ms camera scan rate
 unsigned long lastHeartbeatTime = 0;
 
 // ⏱️ ANTI-FLOOD LOCKOUT SYSTEM
-const unsigned long ANTI_FLOOD_INTERVAL = 15000; 
-unsigned long lockoutTimerStart = 0;             
-bool isLockoutActive = false; 
+const unsigned long ANTI_FLOOD_INTERVAL = 15000;
+unsigned long lockoutTimerStart = 0;
+bool isLockoutActive = false;
 
 // FIXED TIME-LAPSE TELEMETRY INTERVAL
 unsigned long lastTelemetryTime = 0;
@@ -209,26 +209,26 @@ const unsigned long telemetryInterval = 60000; // Sent exactly every 60 seconds 
 
 void setup() {
     Serial.begin(115200);
-    
+
     unsigned long startWindow = millis();
     while (!Serial && (millis() - startWindow < 3000)) {
         delay(10);
     }
-    
+
     if (Serial) {
         Serial.println("\n================================================");
         Serial.println("[🔋 STANDALONE BLE CAPTURE] Booting Local Memory Rig...");
         Serial.println("================================================");
     }
 
-    // 🌟 BATTERY REGULATOR WINDOW: Gives your step-down SMPS module a brief 
+    // 🌟 BATTERY REGULATOR WINDOW: Gives your step-down SMPS module a brief
     // moment to completely stabilize voltage rails before probing the bus
     delay(1000);
 
     // Initialize I2C layers cleanly
-    Wire.begin(6, 7); 
-    Wire.setClock(400000); 
-    
+    Wire.begin(6, 7);
+    Wire.setClock(400000);
+
     if (!AI.begin(&Wire)) {
         if (Serial) Serial.println("[❌ ERROR] Camera board not found over I2C.");
         while (1) { delay(1000); }
@@ -238,7 +238,7 @@ void setup() {
 
     // INITIATE SECURE STANDALONE BLE CONTROLLER
     BLEDevice::init("GC-BLE");
-    
+
     // Configure local radio layers for optimal transmission
     BLEDevice::setPower(ESP_PWR_LVL_N3); // Fire radio at full strength for garden range penetration
 
@@ -274,11 +274,11 @@ void setup() {
         COUNTER_CHAR_UUID,
         BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
     );
-    
+
     // 🌟 THE MISSING SUB-REGISTER: Inject the mandatory 2902 subscription descriptor container!
     // This explicitly gives Chrome the physical address space it needs to hook up background alerts.
-    pCounterChar->addDescriptor(new BLE2902()); 
-    
+    pCounterChar->addDescriptor(new BLE2902());
+
     // Set the initial boot value to 0 (Passed as a raw 4-byte pointer array structure)
     pCounterChar->setValue((uint8_t*)&totalMatchCounter, 4);
 
@@ -293,7 +293,7 @@ void setup() {
     BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
     pAdvertising->setScanResponse(true);
-    
+
     // 🌟 LOWER PULSE FREQUENCY: Extends the sleep window between beacons to 500ms
     // This cleans up your 40ms repeating scope disturbances before connecting
     pAdvertising->setMinInterval(800); // 800 * 0.625ms = 500ms
@@ -301,7 +301,7 @@ void setup() {
 
     pAdvertising->setMinPreferred(0x06);  // Preserves your iPhone sync configurations
     pAdvertising->setMinPreferred(0x12);
-    
+
     // Launch background services
     pService->start();
     BLEDevice::startAdvertising();
@@ -313,15 +313,15 @@ void setup() {
         Serial.println("================================================");
     }
 
-    // TEST INJECTION: Permanently lock the 270-byte red square into Slot 0
+    // TEST INJECTION: Permanently lock the testBlackSpot16x16 into Slot 0
     memcpy(imageRingBuffer[0], testBlackSpot16x16, TEST_IMAGE_SIZE);
     imageLengths[0] = TEST_IMAGE_SIZE;
-    imageMetadata[0] = "Target: RED_SQUARE_TEST (100%) | Length: 354 bytes";
-    
+    imageMetadata[0] = "Target: BLACK_SPOT_TEST (100%) | Length: 354 bytes";
+
     // 🛡️ SECURITY PROTECTION: Shift the camera's write pointer to Slot 1.
     // This forces the AI to store live captures in Slot 1 next, keeping Slot 0 protected.
-    writeIndex = 1; 
-    
+    writeIndex = 1;
+
     if (Serial) {
         Serial.println("===============================================================");
         Serial.println("[TEST IMAGE] 354-Byte 16x16 Black Spot loaded into Slot 0.");
@@ -342,13 +342,13 @@ void loop() {
 
     // ⏱️ PRE-FLIGHT LOCKOUT GATE: Skip camera scanning if the system is cooling down
     if (isLockoutActive) {
-        return; 
+        return;
     }
 
     // IDLE HEARTBEAT: Only prints asterisks if a computer is actively listening
     if (currentMillis - lastHeartbeatTime >= 3000) {
         lastHeartbeatTime = currentMillis;
-        if (Serial) Serial.print("*"); 
+        if (Serial) Serial.print("*");
     }
 
     // STANDARD AI PERSON TRACKING WINDOW
@@ -363,7 +363,7 @@ void loop() {
                 Serial.print("\n[I2C ERROR] Camera bus read failed. Status: ");
                 Serial.println(status);
             }
-            return; 
+            return;
         }
 
         // Check if the AI model found any matching target objects
@@ -373,8 +373,8 @@ void loop() {
 
             if (confidence > 60) {
                 // Engage anti-flood lockout timers...
-                lockoutTimerStart = currentMillis; 
-                isLockoutActive = true; 
+                lockoutTimerStart = currentMillis;
+                isLockoutActive = true;
 
                 totalMatchCounter++;
                 // PUSH NEW VALUE INSTANTLY: Pipes the raw 4-byte integer straight down the air rails
@@ -382,7 +382,7 @@ void loop() {
                 pCounterChar->notify();
 
                 String targetName = (currentID == 0) ? "PERSON" : "UNKNOWN";
-  
+
                 if (Serial) {
                     Serial.println("\n================================================");
                     Serial.print("[TARGET DETECTED] Valid Match: "); Serial.println(targetName);
@@ -395,9 +395,9 @@ void loop() {
 
                 // Save the data directly inside your 4-slot static ring buffer array
                 storeImageInRingBuffer(rawBase64, targetName, confidence);
-                
+
                 // Clear hardware registers to completely resolve retrigger loops
-                AI.invoke(1, true, false); 
+                AI.invoke(1, true, false);
             }
         }
     }
@@ -420,13 +420,13 @@ void storeImageInRingBuffer(const String& base64Str, const String& labelName, in
     }
 
     size_t actualBinaryLen = 0;
-    
+
     // Decode Base64 straight into the exact 4-byte aligned slot pointer row
     int decodeStatus = mbedtls_base64_decode(
-        imageRingBuffer[writeIndex],              
-        IMAGE_SLOT_SIZE,              
-        &actualBinaryLen, 
-        (const unsigned char*)base64Str.c_str(), 
+        imageRingBuffer[writeIndex],
+        IMAGE_SLOT_SIZE,
+        &actualBinaryLen,
+        (const unsigned char*)base64Str.c_str(),
         base64Str.length()
     );
 

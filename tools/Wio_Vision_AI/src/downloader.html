@@ -1,67 +1,180 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GC-BLE Automated Image Hub</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; background: #f0f4f8; padding: 20px; color: #333; }
-        .card { background: white; max-width: 480px; margin: 20px auto; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); border: 1px solid #e1e8ed; }
-        h2 { margin-top: 0; color: #1e293b; font-size: 24px; }
-        p { color: #64748b; font-size: 14px; margin-bottom: 25px; }
-        button { background: #2563eb; color: white; border: none; padding: 14px 28px; font-size: 16px; font-weight: 600; border-radius: 8px; cursor: pointer; margin: 10px 0; width: 100%; transition: background 0.2s; }
-        button:hover { background: #1d4ed8; }
-        button:disabled { background: #94a3b8; cursor: not-allowed; }
-        select { padding: 12px; font-size: 16px; width: 100%; margin: 10px 0; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; color: #334155; }
-        #status { font-weight: 500; margin: 20px 0; color: #475569; font-size: 15px; padding: 10px; background: #f8fafc; border-radius: 6px; }
-        #metadata { margin: 15px 0; color: #15803d; font-weight: 600; background: #f0fdf4; padding: 12px; border-radius: 8px; border: 1px solid #bbf7d0; display: none; font-size: 14px; }
-        img { max-width: 100%; border-radius: 12px; margin-top: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; }
-        .progress-bar { width: 100%; background-color: #e2e8f0; border-radius: 4px; margin-top: 10px; display: none; }
-        .progress-fill { height: 8px; background-color: #2563eb; width: 0%; border-radius: 4px; transition: width 0.1s; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            text-align: center;
+            background: #f0f4f8;
+            padding: 20px;
+            color: #333;
+        }
+
+        .card {
+            background: white;
+            max-width: 480px;
+            margin: 20px auto;
+            padding: 30px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+            border: 1px solid #e1e8ed;
+        }
+
+        h2 {
+            margin-top: 0;
+            color: #1e293b;
+            font-size: 24px;
+        }
+
+        p {
+            color: #64748b;
+            font-size: 14px;
+            margin-bottom: 25px;
+        }
+
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            font-size: 16px;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px 0;
+            width: 100%;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        button:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+
+        select {
+            padding: 12px;
+            font-size: 16px;
+            width: 100%;
+            margin: 10px 0;
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            color: #334155;
+        }
+
+        #status {
+            font-weight: 500;
+            margin: 20px 0;
+            color: #475569;
+            font-size: 15px;
+            padding: 10px;
+            background: #f8fafc;
+            border-radius: 6px;
+        }
+
+        #metadata {
+            margin: 15px 0;
+            color: #15803d;
+            font-weight: 600;
+            background: #f0fdf4;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #bbf7d0;
+            display: none;
+            font-size: 14px;
+        }
+
+        img {
+            max-width: 100%;
+            border-radius: 12px;
+            margin-top: 25px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e2e8f0;
+        }
+
+        .progress-bar {
+            width: 100%;
+            background-color: #e2e8f0;
+            border-radius: 4px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .progress-fill {
+            height: 8px;
+            background-color: #2563eb;
+            width: 0%;
+            border-radius: 4px;
+            transition: width 0.1s;
+        }
     </style>
 </head>
+
 <body>
 
-<div class="card">
-    <h2>GC-BLE Image Viewer</h2>
-    <p>Pull buffered images directly from your garden camera completely offline.</p>
-    
-    <button id="connectBtn">1. Connect to GC-BLE</button>
-    
-    <div id="controls" style="display:none;">
-        <label for="slotSelect" style="display:block; text-align:left; font-size:14px; font-weight:600; color: #475569; margin-bottom: 5px;">Select Memory Slot:</label>
-        <select id="slotSelect">
-            <option value="0">Slot 0</option>
-            <option value="1">Slot 1</option>
-            <option value="2">Slot 2</option>
-            <option value="3">Slot 3</option>
-        </select>
-        <button id="downloadBtn">2. Download & Render Image</button>
-        <button id="clearBtn" style="background: #dc2626; margin-top: 5px;">Clear Device Slots</button>
+    <div class="card">
+        <h2>GC-BLE Image Viewer</h2>
+        <p>Pull buffered images directly from your garden camera completely offline.</p>
+
+        <!-- 📊 THE LIVE LINK PANEL -->
+    <div id="linkPanel" style="background: #f1f5f9; padding: 12px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 600;">
+        <span style="color: #475569;">Link Status:</span>
+        <span id="linkBadge" style="background: #ef4444; color: white; padding: 4px 10px; border-radius: 20px; font-size: 12px; text-transform: uppercase;">Disconnected</span>
+        <!-- 🌟 SIGNAL STRENGTH SPAN COMPLETELY REMOVED FROM HERE -->
     </div>
 
-    <div id="status">Status: Disconnected</div>
-    <div id="globalCounter" style="margin: 15px 0; color: #1e3a8a; font-weight: 700; background: #dbeafe; padding: 12px; border-radius: 8px; border: 1px solid #bfdbfe; display: none; font-size: 15px;">
-        TOTAL MATCHES: 0
+
+        <button id="connectBtn">1. Connect to GC-BLE</button>
+
+        <div id="controls" style="display:none;">
+            <label for="slotSelect"
+                style="display:block; text-align:left; font-size:14px; font-weight:600; color: #475569; margin-bottom: 5px;">Select
+                Memory Slot:</label>
+            <select id="slotSelect">
+                <option value="0">Slot 0</option>
+                <option value="1">Slot 1</option>
+                <option value="2">Slot 2</option>
+                <option value="3">Slot 3</option>
+            </select>
+            <button id="downloadBtn">2. Download & Render Image</button>
+            <button id="clearBtn" style="background: #dc2626; margin-top: 5px;">Clear Device Slots</button>
+        </div>
+
+        <div id="status">Status: Disconnected</div>
+        <div id="globalCounter"
+            style="margin: 15px 0; color: #1e3a8a; font-weight: 700; background: #dbeafe; padding: 12px; border-radius: 8px; border: 1px solid #bfdbfe; display: none; font-size: 15px;">
+            TOTAL MATCHES: 0
+        </div>
+        <div id="metadata"></div>
+        <div class="progress-bar" id="progressOuter">
+            <div class="progress-fill" id="progressInner"></div>
+        </div>
+        <div id="imgContainer"></div>
     </div>
-    <div id="metadata"></div>
-    <div class="progress-bar" id="progressOuter"><div class="progress-fill" id="progressInner"></div></div>
-    <div id="imgContainer"></div>
-</div>
 
-<script>
-const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-const META_CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-const CONTROL_CHAR_UUID = "e3223119-9445-4e7d-8700-d5382c474d21";
-const STREAM_CHAR_UUID = "622a5785-5ee6-4e58-9cf8-6628fb05cf71";
+    <script>
+        const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+        const META_CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+        const CONTROL_CHAR_UUID = "e3223119-9445-4e7d-8700-d5382c474d21";
+        const STREAM_CHAR_UUID = "622a5785-5ee6-4e58-9cf8-6628fb05cf71";
 
-let gattServer = null;
-let controlChar = null;
-let metaChar = null;
-let streamChar = null;
-let counterChar = null;
+        let gattServer = null;
+        let controlChar = null;
+        let metaChar = null;
+        let streamChar = null;
+        let counterChar = null;
 
-// STEP A: Handle Core Bluetooth Device Connection
+        let rssiInterval = null;
+
+// STEP A: Handle Core Bluetooth Device Connection & Hardware Listeners
 document.getElementById('connectBtn').addEventListener('click', async () => {
     try {
         document.getElementById('status').innerText = "Status: Scanning for GC-BLE...";
@@ -70,8 +183,21 @@ document.getElementById('connectBtn').addEventListener('click', async () => {
             optionalServices: [SERVICE_UUID]
         });
 
+        // HARDWARE DISCONNECT INTERCEPTOR
+        device.addEventListener('gattserverdisconnected', () => {
+            document.getElementById('linkBadge').innerText = "Disconnected";
+            document.getElementById('linkBadge').style.background = "#ef4444";
+            document.getElementById('controls').style.display = 'none';
+            document.getElementById('connectBtn').style.display = 'block';
+            document.getElementById('status').innerText = "Status: Connection lost or dropped by hardware rails.";
+        });
+
         document.getElementById('status').innerText = "Status: Connecting to device...";
-        gattServer = await device.gatt.connect(); 
+        gattServer = await device.gatt.connect();
+
+        // Update link status badge instantly on hardware verification
+        document.getElementById('linkBadge').innerText = "Connected";
+        document.getElementById('linkBadge').style.background = "#10b981";
 
         document.getElementById('status').innerText = "Status: Initialising secure services...";
         const service = await gattServer.getPrimaryService(SERVICE_UUID);
@@ -103,121 +229,125 @@ document.getElementById('connectBtn').addEventListener('click', async () => {
         document.getElementById('connectBtn').style.display = 'none';
         document.getElementById('controls').style.display = 'block';
     } catch (error) {
+        document.getElementById('linkBadge').innerText = "Disconnected";
+        document.getElementById('linkBadge').style.background = "#ef4444";
         document.getElementById('status').innerText = "Connection Failed: " + error.message;
         console.error(error);
     }
 });
 
-// STEP B: Bounded Downloader with Step-by-Step Telemetry
-document.getElementById('downloadBtn').addEventListener('click', async () => {
-    const slot = document.getElementById('slotSelect').value;
-    document.getElementById('status').innerText = "Status: Requesting Slot [" + slot + "]...";
-    document.getElementById('downloadBtn').disabled = true;
-    document.getElementById('metadata').style.display = 'none';
-    document.getElementById('progressOuter').style.display = 'none';
-    document.getElementById('progressInner').style.width = '0%';
 
-    try {
-        const slotByte = new Uint8Array([parseInt(slot)]);
-        await controlChar.writeValueWithResponse(slotByte);
-        
-        await new Promise(resolve => setTimeout(resolve, 400)); 
 
-        const metaVal = await metaChar.readValue();
-        const decoder = new TextDecoder();
-        const metaText = decoder.decode(metaVal);
+        // STEP B: Bounded Downloader with Step-by-Step Telemetry
+        document.getElementById('downloadBtn').addEventListener('click', async () => {
+            const slot = document.getElementById('slotSelect').value;
+            document.getElementById('status').innerText = "Status: Requesting Slot [" + slot + "]...";
+            document.getElementById('downloadBtn').disabled = true;
+            document.getElementById('metadata').style.display = 'none';
+            document.getElementById('progressOuter').style.display = 'none';
+            document.getElementById('progressInner').style.width = '0%';
 
-        document.getElementById('metadata').innerText = metaText;
-        document.getElementById('metadata').style.display = 'block';
+            try {
+                const slotByte = new Uint8Array([parseInt(slot)]);
+                await controlChar.writeValueWithResponse(slotByte);
 
-        let totalBytesExpected = 0;
-        const lengthMatch = metaText.match(/Length:\s*(\d+)/);
-        if (lengthMatch) {
-            totalBytesExpected = parseInt(lengthMatch[1]);
-        }
+                await new Promise(resolve => setTimeout(resolve, 400));
 
-        if (totalBytesExpected === 0) {
-            document.getElementById('status').innerText = "Status: Selected slot contains no valid image data.";
-            document.getElementById('downloadBtn').disabled = false;
-            return;
-        }
+                const metaVal = await metaChar.readValue();
+                const decoder = new TextDecoder();
+                const metaText = decoder.decode(metaVal);
 
-        const maxChunkSize = 240;
-        const totalCallsNeeded = Math.ceil(totalBytesExpected / maxChunkSize);
+                document.getElementById('metadata').innerText = metaText;
+                document.getElementById('metadata').style.display = 'block';
 
-        let fileChunks = [];
-        let downloadedBytes = 0;
-        document.getElementById('progressOuter').style.display = 'block';
+                let totalBytesExpected = 0;
+                const lengthMatch = metaText.match(/Length:\s*(\d+)/);
+                if (lengthMatch) {
+                    totalBytesExpected = parseInt(lengthMatch[1]);
+                }
 
-        for (let callIndex = 0; callIndex < totalCallsNeeded; callIndex++) {
-            if (callIndex > 0) {
-                const commandPacket = new Uint8Array([parseInt(slot), callIndex]);
-                await controlChar.writeValueWithResponse(commandPacket);
-                await new Promise(resolve => setTimeout(resolve, 30)); 
+                if (totalBytesExpected === 0) {
+                    document.getElementById('status').innerText = "Status: Selected slot contains no valid image data.";
+                    document.getElementById('downloadBtn').disabled = false;
+                    return;
+                }
+
+                const maxChunkSize = 240;
+                const totalCallsNeeded = Math.ceil(totalBytesExpected / maxChunkSize);
+
+                let fileChunks = [];
+                let downloadedBytes = 0;
+                document.getElementById('progressOuter').style.display = 'block';
+
+                for (let callIndex = 0; callIndex < totalCallsNeeded; callIndex++) {
+                    if (callIndex > 0) {
+                        const commandPacket = new Uint8Array([parseInt(slot), callIndex]);
+                        await controlChar.writeValueWithResponse(commandPacket);
+                        await new Promise(resolve => setTimeout(resolve, 30));
+                    }
+
+                    const rawChunk = await streamChar.readValue();
+                    const chunkArray = new Uint8Array(rawChunk.buffer, rawChunk.byteOffset, rawChunk.byteLength);
+
+                    fileChunks.push(chunkArray);
+                    downloadedBytes += rawChunk.byteLength;
+
+                    const percent = Math.min(100, Math.floor((downloadedBytes / totalBytesExpected) * 100));
+                    document.getElementById('progressInner').style.width = percent + '%';
+                    document.getElementById('status').innerText = `Status: Downloading (${downloadedBytes}/${totalBytesExpected} bytes)...`;
+                }
+
+                let finalImageBuffer = new Uint8Array(downloadedBytes);
+                let currentWriteOffset = 0;
+                for (let chunk of fileChunks) {
+                    finalImageBuffer.set(chunk, currentWriteOffset);
+                    currentWriteOffset += chunk.length;
+                }
+
+                document.getElementById('status').innerText = "Status: Rendering photo...";
+                const completeBlob = new Blob([finalImageBuffer], { type: 'image/jpeg' });
+                const imgUrl = URL.createObjectURL(completeBlob);
+
+                document.getElementById('imgContainer').innerHTML = `<img src="${imgUrl}" alt="Garden Offline Capture" />`;
+                document.getElementById('status').innerText = "Status: Transfer complete!";
+            } catch (error) {
+                document.getElementById('status').innerText = "Stream Interrupted: " + error.message;
+                console.error(error);
+            } finally {
+                document.getElementById('downloadBtn').disabled = false;
             }
+        });
 
-            const rawChunk = await streamChar.readValue();
-            const chunkArray = new Uint8Array(rawChunk.buffer, rawChunk.byteOffset, rawChunk.byteLength);
-            
-            fileChunks.push(chunkArray);
-            downloadedBytes += rawChunk.byteLength;
+        // STEP C: Handshake to Clear the Slots
+        document.getElementById('clearBtn').addEventListener('click', async () => {
+            if (!confirm("Are you sure you want to erase all slots?")) return;
 
-            const percent = Math.min(100, Math.floor((downloadedBytes / totalBytesExpected) * 100));
-            document.getElementById('progressInner').style.width = percent + '%';
-            document.getElementById('status').innerText = `Status: Downloading (${downloadedBytes}/${totalBytesExpected} bytes)...`;
-        }
+            document.getElementById('status').innerText = "Status: Executing memory wipe command...";
+            document.getElementById('clearBtn').disabled = true;
+            document.getElementById('metadata').style.display = 'none';
 
-        let finalImageBuffer = new Uint8Array(downloadedBytes);
-        let currentWriteOffset = 0;
-        for (let chunk of fileChunks) {
-            finalImageBuffer.set(chunk, currentWriteOffset);
-            currentWriteOffset += chunk.length;
-        }
+            try {
+                const encoder = new TextEncoder();
+                const clearCommand = encoder.encode('C');
+                await controlChar.writeValueWithResponse(clearCommand);
 
-        document.getElementById('status').innerText = "Status: Rendering photo...";
-        const completeBlob = new Blob([finalImageBuffer], { type: 'image/jpeg' });
-        const imgUrl = URL.createObjectURL(completeBlob);
+                document.getElementById('globalCounter').innerText = "TOTAL MATCHES: 0";
+                await new Promise(resolve => setTimeout(resolve, 300));
 
-        document.getElementById('imgContainer').innerHTML = `<img src="${imgUrl}" alt="Garden Offline Capture" />`;
-        document.getElementById('status').innerText = "Status: Transfer complete!";
-    } catch (error) {
-        document.getElementById('status').innerText = "Stream Interrupted: " + error.message;
-        console.error(error);
-    } finally {
-        document.getElementById('downloadBtn').disabled = false;
-    }
-});
-
-// STEP C: Handshake to Clear the Slots
-document.getElementById('clearBtn').addEventListener('click', async () => {
-    if (!confirm("Are you sure you want to erase all slots?")) return;
-    
-    document.getElementById('status').innerText = "Status: Executing memory wipe command...";
-    document.getElementById('clearBtn').disabled = true;
-    document.getElementById('metadata').style.display = 'none';
-
-    try {
-        const encoder = new TextEncoder();
-        const clearCommand = encoder.encode('C');
-        await controlChar.writeValueWithResponse(clearCommand);
-        
-        document.getElementById('globalCounter').innerText = "TOTAL MATCHES: 0";
-        await new Promise(resolve => setTimeout(resolve, 300));
-
-        const metaVal = await metaChar.readValue();
-        const decoder = new TextDecoder();
-        document.getElementById('metadata').innerText = decoder.decode(metaVal);
-        document.getElementById('metadata').style.display = 'block';
-        document.getElementById('status').innerText = "Status: Memory clear complete.";
-        document.getElementById('imgContainer').innerHTML = ""; 
-    } catch (error) {
-        document.getElementById('status').innerText = "Wipe Failed: " + error.message;
-        console.error(error);
-    } finally {
-        document.getElementById('clearBtn').disabled = false;
-    }
-});
-</script>
+                const metaVal = await metaChar.readValue();
+                const decoder = new TextDecoder();
+                document.getElementById('metadata').innerText = decoder.decode(metaVal);
+                document.getElementById('metadata').style.display = 'block';
+                document.getElementById('status').innerText = "Status: Memory clear complete.";
+                document.getElementById('imgContainer').innerHTML = "";
+            } catch (error) {
+                document.getElementById('status').innerText = "Wipe Failed: " + error.message;
+                console.error(error);
+            } finally {
+                document.getElementById('clearBtn').disabled = false;
+            }
+        });
+    </script>
 </body>
-</html>
 
+</html>

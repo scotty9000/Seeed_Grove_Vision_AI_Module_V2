@@ -37,7 +37,7 @@
             <option value="3">Slot 3</option>
         </select>
         <button id="downloadBtn">2. Download & Render Image</button>
-        <button id="clearBtn" style="background: #dc2626; margin-top: 5px;">Wipe Device Memory</button>
+        <button id="clearBtn" style="background: #dc2626; margin-top: 5px;">Clear Device Slots</button>
     </div>
 
     <div id="status">Status: Disconnected</div>
@@ -188,7 +188,7 @@ document.getElementById('downloadBtn').addEventListener('click', async () => {
     }
 });
 
-// STEP C: Handshake to Wipe Device Memory
+// STEP C: Handshake to Clear the Slots
 document.getElementById('clearBtn').addEventListener('click', async () => {
     if (!confirm("Are you sure you want to erase all slots?")) return;
     

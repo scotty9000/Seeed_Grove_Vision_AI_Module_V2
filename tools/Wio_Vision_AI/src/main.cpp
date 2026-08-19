@@ -240,7 +240,7 @@ void setup() {
     BLEDevice::init("GC-BLE");
     
     // Configure local radio layers for optimal transmission
-    BLEDevice::setPower(ESP_PWR_LVL_P9); // Fire radio at full strength for garden range penetration
+    BLEDevice::setPower(ESP_PWR_LVL_N3); // Fire radio at full strength for garden range penetration
 
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new ServerCallbacks());
@@ -287,11 +287,23 @@ void setup() {
 
 
     // Configure Advertising wrapper so your phone can find the device offline
+    // 🌟 SOFTWARE FIX: Lower RF power to soften the download spike depths
+    BLEDevice::setPower(ESP_PWR_LVL_N3);
+
     BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
     pAdvertising->setScanResponse(true);
-    pAdvertising->setMinPreferred(0x06);  // functions help with iPhone connection speed syncing
+    
+    // 🌟 LOWER PULSE FREQUENCY: Extends the sleep window between beacons to 500ms
+    // This cleans up your 40ms repeating scope disturbances before connecting
+    pAdvertising->setMinInterval(800); // 800 * 0.625ms = 500ms
+    pAdvertising->setMaxInterval(800);
+
+    pAdvertising->setMinPreferred(0x06);  // Preserves your iPhone sync configurations
     pAdvertising->setMinPreferred(0x12);
+    
+    // Launch background services
+    pService->start();
     BLEDevice::startAdvertising();
 
     if (Serial) {

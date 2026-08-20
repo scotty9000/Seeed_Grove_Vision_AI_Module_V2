@@ -90,22 +90,22 @@ class ControlCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pCharacteristic) {
         std::string rawValue = pCharacteristic->getValue();
 
-        // 🌟 RAW DIAGNOSTIC SCANNER: Fires instantly before ANY if-statements or variables process
-        if (Serial) {
-            Serial.println("\n========================================================");
-            Serial.print("[⚙️ HARDWARE INTERCEPT] Incoming packet length: ");
-            Serial.print(rawValue.length()); Serial.println(" bytes.");
+        // // 🌟 RAW DIAGNOSTIC SCANNER: Fires instantly before ANY if-statements or variables process
+        // if (Serial) {
+        //     Serial.println("\n========================================================");
+        //     Serial.print("[⚙️ HARDWARE INTERCEPT] Incoming packet length: ");
+        //     Serial.print(rawValue.length()); Serial.println(" bytes.");
 
-            Serial.print(" -> Byte Contents (Hex): ");
-            for(size_t i = 0; i < rawValue.length(); i++) {
-                Serial.print("0x");
-                if((unsigned char)rawValue[i] < 16) Serial.print("0");
-                Serial.print((unsigned char)rawValue[i], HEX);
-                Serial.print(" ");
-            }
-            Serial.println();
-            Serial.println("========================================================");
-        }
+        //     Serial.print(" -> Byte Contents (Hex): ");
+        //     for(size_t i = 0; i < rawValue.length(); i++) {
+        //         Serial.print("0x");
+        //         if((unsigned char)rawValue[i] < 16) Serial.print("0");
+        //         Serial.print((unsigned char)rawValue[i], HEX);
+        //         Serial.print(" ");
+        //     }
+        //     Serial.println();
+        //     Serial.println("========================================================");
+        // }
 
         if (rawValue.length() > 0) {
             char slotChar = rawValue[0]; // Intercept the primary action character
@@ -199,7 +199,7 @@ const unsigned long checkInterval = 200; // Snappy 200ms camera scan rate
 unsigned long lastHeartbeatTime = 0;
 
 // ⏱️ ANTI-FLOOD LOCKOUT SYSTEM
-const unsigned long ANTI_FLOOD_INTERVAL = 15000;
+const unsigned long ANTI_FLOOD_INTERVAL = 1000;
 unsigned long lockoutTimerStart = 0;
 bool isLockoutActive = false;
 
@@ -371,7 +371,7 @@ void loop() {
             int currentID = AI.boxes()[0].target;
             int confidence = AI.boxes()[0].score;
 
-            if (confidence > 60) {
+            if (confidence > 50) {
                 // Engage anti-flood lockout timers...
                 lockoutTimerStart = currentMillis;
                 isLockoutActive = true;

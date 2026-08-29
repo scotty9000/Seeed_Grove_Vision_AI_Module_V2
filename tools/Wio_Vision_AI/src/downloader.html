@@ -128,12 +128,9 @@
     <div id="linkPanel" style="background: #f1f5f9; padding: 12px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 600;">
         <span style="color: #475569;">Link Status:</span>
         <span id="linkBadge" style="background: #ef4444; color: white; padding: 4px 10px; border-radius: 20px; font-size: 12px; text-transform: uppercase;">Disconnected</span>
-        <!-- 🌟 SIGNAL STRENGTH SPAN COMPLETELY REMOVED FROM HERE -->
     </div>
 
-
         <button id="connectBtn">1. Connect to GC-BLE</button>
-
         <div id="controls" style="display:none;">
             <label for="slotSelect"
                 style="display:block; text-align:left; font-size:14px; font-weight:600; color: #475569; margin-bottom: 5px;">Select
@@ -174,67 +171,67 @@
 
         let rssiInterval = null;
 
-// STEP A: Handle Core Bluetooth Device Connection & Hardware Listeners
-document.getElementById('connectBtn').addEventListener('click', async () => {
-    try {
-        document.getElementById('status').innerText = "Status: Scanning for GC-BLE...";
-        const device = await navigator.bluetooth.requestDevice({
-            filters: [{ name: 'GC-BLE' }],
-            optionalServices: [SERVICE_UUID]
+        // STEP A: Handle Core Bluetooth Device Connection & Hardware Listeners
+        document.getElementById('connectBtn').addEventListener('click', async () => {
+            try {
+                document.getElementById('status').innerText = "Status: Scanning for GC-BLE...";
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'GC-BLE' }],
+                    optionalServices: [SERVICE_UUID]
+                });
+
+                // HARDWARE DISCONNECT INTERCEPTOR
+                device.addEventListener('gattserverdisconnected', () => {
+                    document.getElementById('linkBadge').innerText = "Disconnected";
+                    document.getElementById('linkBadge').style.background = "#ef4444";
+                    document.getElementById('controls').style.display = 'none';
+                    document.getElementById('connectBtn').style.display = 'block';
+                    document.getElementById('status').innerText = "Status: Connection lost or dropped by hardware rails.";
+                });
+
+                document.getElementById('status').innerText = "Status: Connecting to device...";
+                gattServer = await device.gatt.connect();
+
+                // Update link status badge instantly on hardware verification
+                document.getElementById('linkBadge').innerText = "Connected";
+                document.getElementById('linkBadge').style.background = "#10b981";
+
+                document.getElementById('status').innerText = "Status: Initialising secure services...";
+                const service = await gattServer.getPrimaryService(SERVICE_UUID);
+
+                controlChar = await service.getCharacteristic(CONTROL_CHAR_UUID);
+                metaChar = await service.getCharacteristic(META_CHAR_UUID);
+                streamChar = await service.getCharacteristic(STREAM_CHAR_UUID);
+                counterChar = await service.getCharacteristic("d8a1c322-1f45-4e7d-8700-d5382c474d21");
+
+                const initialCounterVal = await counterChar.readValue();
+                const initialMatches = initialCounterVal.getUint32(0, true);
+                document.getElementById('globalCounter').innerText = `TOTAL MATCHES: ${initialMatches}`;
+                document.getElementById('globalCounter').style.display = 'block';
+
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                // LIVE AUTO-UPDATE ENGINE (Listens to the air rails in real-time)
+                const handleLiveCounterUpdate = (event) => {
+                    const rawVal = event.target.value;
+                    const liveMatches = rawVal.getUint32(0, true);
+                    document.getElementById('globalCounter').innerText = `TOTAL MATCHES: ${liveMatches}`;
+                    console.log(`[LIVE ALERT] Match Counter Auto-Incremented to: ${liveMatches}`);
+                };
+
+                await counterChar.startNotifications();
+                counterChar.addEventListener('characteristicvaluechanged', handleLiveCounterUpdate);
+
+                document.getElementById('status').innerText = "Status: Connected and ready!";
+                document.getElementById('connectBtn').style.display = 'none';
+                document.getElementById('controls').style.display = 'block';
+            } catch (error) {
+                document.getElementById('linkBadge').innerText = "Disconnected";
+                document.getElementById('linkBadge').style.background = "#ef4444";
+                document.getElementById('status').innerText = "Connection Failed: " + error.message;
+                console.error(error);
+            }
         });
-
-        // HARDWARE DISCONNECT INTERCEPTOR
-        device.addEventListener('gattserverdisconnected', () => {
-            document.getElementById('linkBadge').innerText = "Disconnected";
-            document.getElementById('linkBadge').style.background = "#ef4444";
-            document.getElementById('controls').style.display = 'none';
-            document.getElementById('connectBtn').style.display = 'block';
-            document.getElementById('status').innerText = "Status: Connection lost or dropped by hardware rails.";
-        });
-
-        document.getElementById('status').innerText = "Status: Connecting to device...";
-        gattServer = await device.gatt.connect();
-
-        // Update link status badge instantly on hardware verification
-        document.getElementById('linkBadge').innerText = "Connected";
-        document.getElementById('linkBadge').style.background = "#10b981";
-
-        document.getElementById('status').innerText = "Status: Initialising secure services...";
-        const service = await gattServer.getPrimaryService(SERVICE_UUID);
-
-        controlChar = await service.getCharacteristic(CONTROL_CHAR_UUID);
-        metaChar = await service.getCharacteristic(META_CHAR_UUID);
-        streamChar = await service.getCharacteristic(STREAM_CHAR_UUID);
-        counterChar = await service.getCharacteristic("d8a1c322-1f45-4e7d-8700-d5382c474d21");
-
-        const initialCounterVal = await counterChar.readValue();
-        const initialMatches = initialCounterVal.getUint32(0, true);
-        document.getElementById('globalCounter').innerText = `TOTAL MATCHES: ${initialMatches}`;
-        document.getElementById('globalCounter').style.display = 'block';
-
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        // LIVE AUTO-UPDATE ENGINE (Listens to the air rails in real-time)
-        const handleLiveCounterUpdate = (event) => {
-            const rawVal = event.target.value;
-            const liveMatches = rawVal.getUint32(0, true);
-            document.getElementById('globalCounter').innerText = `TOTAL MATCHES: ${liveMatches}`;
-            console.log(`[LIVE ALERT] Match Counter Auto-Incremented to: ${liveMatches}`);
-        };
-
-        await counterChar.startNotifications();
-        counterChar.addEventListener('characteristicvaluechanged', handleLiveCounterUpdate);
-
-        document.getElementById('status').innerText = "Status: Connected and ready!";
-        document.getElementById('connectBtn').style.display = 'none';
-        document.getElementById('controls').style.display = 'block';
-    } catch (error) {
-        document.getElementById('linkBadge').innerText = "Disconnected";
-        document.getElementById('linkBadge').style.background = "#ef4444";
-        document.getElementById('status').innerText = "Connection Failed: " + error.message;
-        console.error(error);
-    }
-});
 
 
 

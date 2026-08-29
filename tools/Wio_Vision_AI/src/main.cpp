@@ -356,7 +356,7 @@ void loop() {
         lastCheckTime = currentMillis;
 
         // Run AI evaluation pass
-        int status = AI.invoke(1, false, true);
+        int status = AI.invoke(1, true, true);
 
         if (status < 0) {
             if (Serial) {

@@ -356,7 +356,7 @@ void loop() {
         lastCheckTime = currentMillis;
 
         // Run AI evaluation pass
-        int status = AI.invoke(1, true, true);
+        int status = AI.invoke(1, false, true);
 
         if (status < 0) {
             if (Serial) {
@@ -397,7 +397,7 @@ void loop() {
                 storeImageInRingBuffer(rawBase64, targetName, confidence);
 
                 // Clear hardware registers to completely resolve retrigger loops
-                AI.invoke(1, false, false);
+                AI.invoke(1, true, false);
             }
         }
     }

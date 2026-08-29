@@ -397,7 +397,7 @@ void loop() {
                 storeImageInRingBuffer(rawBase64, targetName, confidence);
 
                 // Clear hardware registers to completely resolve retrigger loops
-                AI.invoke(1, true, false);
+                AI.invoke(1, false, false);
             }
         }
     }

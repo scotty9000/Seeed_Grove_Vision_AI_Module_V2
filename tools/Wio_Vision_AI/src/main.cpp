@@ -6,6 +6,7 @@
 #include <BLEUtils.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
+#include <esp_sleep.h>
 
 SSCMA AI;
 
@@ -333,6 +334,28 @@ void setup() {
 
 void loop() {
     unsigned long currentMillis = millis();
+
+    // 🌟 1. POWER TEST INTERCEPT: Listen for 's' key to trigger 60s Light Sleep
+    if (totalMatchCounter == 3) {
+        Serial.println("\n========================================================");
+        Serial.println("[💤 POWER TEST] Entering 60s Light Sleep...");
+        Serial.println("========================================================");
+        Serial.flush();
+
+        // Configure hardware timer block to wake up in exactly 60 seconds
+        esp_sleep_enable_timer_wakeup(60ULL * 1000ULL * 1000ULL);
+
+        // --- COMMAND LIGHT SLEEP ---
+        esp_light_sleep_start();
+
+        // --- THE WAKEUP VECTOR ---
+        //Serial.begin(115200);
+        Serial.println("\n========================================================");
+        Serial.println("[⏰ WAKE UP] 60-second Light Sleep frame completed.");
+        Serial.println("========================================================");
+        totalMatchCounter = 0;
+        
+    }
 
     // ⏱️ AUTOMATIC ANTI-FLOOD LOCKOUT RELEASE CHECKER
     if (isLockoutActive && (currentMillis - lockoutTimerStart >= ANTI_FLOOD_INTERVAL)) {

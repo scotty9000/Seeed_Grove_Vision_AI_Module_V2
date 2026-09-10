@@ -418,7 +418,7 @@ void loop()
                 pCounterChar->setValue((uint8_t *)&totalMatchCounter, 4);
                 pCounterChar->notify();
 
-                String targetName = (currentID == 0) ? "PERSON" : "UNKNOWN";
+                String targetName = (currentID == 0) ? "CAT" : "DOG";
 
                 if (Serial)
                 {

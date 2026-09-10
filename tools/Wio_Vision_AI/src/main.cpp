@@ -7,6 +7,7 @@
 #include <BLEServer.h>
 #include <BLE2902.h>
 #include <esp_sleep.h>
+#include <Preferences.h>
 
 SSCMA AI;
 
@@ -67,6 +68,8 @@ BLECharacteristic *pMetadataChar = NULL;
 BLECharacteristic *pControlChar = NULL;
 BLECharacteristic *pDataStreamChar = NULL;
 bool deviceConnected = false;
+
+Preferences preferences;
 
 void storeImageInRingBuffer(const String &base64Str, const String &labelName, int confidence);
 
@@ -131,6 +134,9 @@ class ControlCallbacks : public BLECharacteristicCallbacks
                 if (newThreshold >= 50 && newThreshold <= 100)
                 {
                     detectionConfidenceThreshold = newThreshold;
+
+                    // Save to Non-Volatile Storage (NVS)
+                    preferences.putUInt("conf_thresh", detectionConfidenceThreshold);
 
                     // Update control characteristic value so clients can read the current setting
                     pControlChar->setValue(&detectionConfidenceThreshold, 1);
@@ -240,6 +246,18 @@ void setup()
         delay(10);
     }
 
+    // Initialize Preferences under namespace "settings" in Read-Only mode = false
+    preferences.begin("settings", false);
+
+    // Fetch stored value (Key: "conf_thresh", Default: 50)
+    detectionConfidenceThreshold = preferences.getUInt("conf_thresh", 50);
+
+    if (Serial) {
+        Serial.print("[NVS] Loaded Confidence Threshold: ");
+        Serial.print(detectionConfidenceThreshold);
+        Serial.println("%");
+    }
+
     if (Serial)
     {
         Serial.println("\n================================================");
@@ -262,8 +280,9 @@ void setup()
             delay(1000);
         }
     }
-    if (Serial)
+    if (Serial) {
         Serial.println("[SUCCESS] Camera board online over I2C.");
+    }
     delay(500);
 
     // INITIATE SECURE STANDALONE BLE CONTROLLER

@@ -1,0 +1,35 @@
+# ==========================================
+# 🐍 Python Virtual Environment & Caches
+# ==========================================
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# ==========================================
+# 📦 Datasets & Data Pipelines (Keep Git Light!)
+# ==========================================
+# Ignores your local dataset downloads and crop folders
+
+*.jpg
+
+# ==========================================
+# 🧠 Compiled Deployment Packages & Binaries
+# ==========================================
+# Ignores downloaded Edge Impulse zip extractions and local models
+*.zip
+*.img
+*.bin
+build/
+dist/
+
+# ==========================================
+# 🖥️ IDE & OS Specific Files
+# ==========================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

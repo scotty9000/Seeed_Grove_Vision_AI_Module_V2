@@ -54,8 +54,8 @@ int writeIndex = 0;         // Tracks where the camera writes the next fresh ima
 int selectedSlot = 0;       // Tracks which slot your phone app wants to read
 uint32_t currentOffset = 0; // Tracks data chunk position during transmission
 
-// 🎯 DYNAMIC DETECTION CONFIDENCE THRESHOLD
-uint8_t detectionConfidenceThreshold = 50; // Default: 50%
+// 🎯 DYNAMIC DETECTION SCORE THRESHOLD
+uint8_t detectionThreshold = 50; // Default: 50%
 
 // BLE REWRITE SERVICE & CHARACTERISTIC AUTO-GENERATION UUIDS
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
@@ -74,7 +74,7 @@ bool deviceConnected = false;
 
 Preferences preferences;
 
-void storeImageInRingBuffer(const String &base64Str, const String &labelName, int confidence);
+void storeImageInRingBuffer(const String &base64Str, const String &labelName, int score);
 
 class ServerCallbacks : public BLEServerCallbacks
 {
@@ -130,29 +130,29 @@ class ControlCallbacks : public BLECharacteristicCallbacks
                 return;
             }
 
-            // 🎯 CONFIDENCE THRESHOLD UPDATE COMMAND ('T', confValue)
+            // 🎯 SCORE THRESHOLD UPDATE COMMAND ('T', thresholdValue)
             if ((slotChar == 'T' || slotChar == 84) && rawValue.length() >= 2)
             {
                 uint8_t newThreshold = (uint8_t)rawValue[1];
                 if (newThreshold >= 50 && newThreshold <= 100)
                 {
-                    detectionConfidenceThreshold = newThreshold;
+                    detectionThreshold = newThreshold;
 
                     // Save to Non-Volatile Storage (NVS)
-                    preferences.putUInt("conf_thresh", detectionConfidenceThreshold);
+                    preferences.putUInt("score_thresh", detectionThreshold);
 
                     // Update control characteristic value so clients can read the current setting
-                    pControlChar->setValue(&detectionConfidenceThreshold, 1);
+                    pControlChar->setValue(&detectionThreshold, 1);
 
-                    String confMeta = "Confidence Threshold set to " + String(detectionConfidenceThreshold) + "%";
-                    pMetadataChar->setValue(confMeta.c_str());
+                    String scoreMeta = "Confidence Threshold set to " + String(detectionThreshold) + "%";
+                    pMetadataChar->setValue(scoreMeta.c_str());
                     pMetadataChar->notify();
 
                     if (Serial)
                     {
                         Serial.println("\n================================================");
-                        Serial.print("[🎯 CONFIDENCE UPDATE] New Threshold: ");
-                        Serial.print(detectionConfidenceThreshold);
+                        Serial.print("[SCORE UPDATE] New Threshold: ");
+                        Serial.print(detectionThreshold);
                         Serial.println("%");
                         Serial.println("================================================");
                     }
@@ -252,12 +252,12 @@ void setup()
     // Initialize Preferences under namespace "settings" in Read-Only mode = false
     preferences.begin("settings", false);
 
-    // Fetch stored value (Key: "conf_thresh", Default: 50)
-    detectionConfidenceThreshold = preferences.getUInt("conf_thresh", 50);
+    // Fetch stored value (Key: "score_thresh", Default: 50)
+    detectionThreshold = preferences.getUInt("score_thresh", 50);
 
     if (Serial) {
         Serial.print("[NVS] Loaded Confidence Threshold: ");
-        Serial.print(detectionConfidenceThreshold);
+        Serial.print(detectionThreshold);
         Serial.println("%");
     }
 
@@ -310,7 +310,7 @@ void setup()
         CONTROL_CHAR_UUID,
         BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
     pControlChar->setCallbacks(new ControlCallbacks());
-    pControlChar->setValue(&detectionConfidenceThreshold, 1); // Expose active confidence threshold on read
+    pControlChar->setValue(&detectionThreshold, 1); // Expose active score threshold on read
 
     // Characteristic C: High-Speed sequential data stream rail (Read-Only)
     pDataStreamChar = pService->createCharacteristic(
@@ -409,61 +409,39 @@ void loop()
         auto target = AI.classes()[0].target;
         auto score  = AI.classes()[0].score;
 
-        if (target == CAT && score >= 70)
+        if (target == CAT && score >= detectionThreshold)
         {
+            lockoutTimerStart = currentMillis;
+            isLockoutActive = true;
+
+            totalMatchCounter++;
+            pCounterChar->setValue((uint8_t *)&totalMatchCounter, 4);
+            pCounterChar->notify();
+
+            String targetName = "CAT";
+
             if (Serial)
             {
-                Serial.print("target=");
-                Serial.print(target);
-                Serial.print(" score=");
-                Serial.println(score);
-            
+                Serial.println("\n================================================");
+                Serial.print("[TARGET DETECTED] Valid Match: ");
+                Serial.println(targetName);
+                Serial.print("[TARGET DETECTED] Score: ");
+                Serial.print(score);
+                Serial.print("% (Threshold: ");
+                Serial.print(detectionThreshold);
+                Serial.println("%)");
+                Serial.println("================================================");
             }
+
+            String rawBase64 = AI.last_image();
+            storeImageInRingBuffer(rawBase64, targetName, score);
+
+            AI.invoke(1, true, false); // otherwise get repeat images
         }
-
-
-
-        // // Evaluate bounding box detections
-        // if (AI.boxes().size() > 0)
-        // {
-        //     int currentID = AI.boxes()[0].target;
-        //     int confidence = AI.boxes()[0].score;
-
-        //     // 🎯 DYNAMIC CONFIDENCE GATE CHECK
-        //     if (confidence >= detectionConfidenceThreshold)
-        //     {
-        //         lockoutTimerStart = currentMillis;
-        //         isLockoutActive = true;
-
-        //         totalMatchCounter++;
-        //         pCounterChar->setValue((uint8_t *)&totalMatchCounter, 4);
-        //         pCounterChar->notify();
-
-        //         String targetName = (currentID == 0) ? "CAT" : "NO_CAT";
-
-        //         if (Serial)
-        //         {
-        //             Serial.println("\n================================================");
-        //             Serial.print("[TARGET DETECTED] Valid Match: ");
-        //             Serial.println(targetName);
-        //             Serial.print("[TARGET DETECTED] Confidence: ");
-        //             Serial.print(confidence);
-        //             Serial.print("% (Threshold: ");
-        //             Serial.print(detectionConfidenceThreshold);
-        //             Serial.println("%)");
-        //             Serial.println("================================================");
-        //         }
-
-        //         String rawBase64 = AI.last_image();
-        //         storeImageInRingBuffer(rawBase64, targetName, confidence);
-
-        //         AI.invoke(1, true, false);
-        //     }
-        // }
     }
 }
 
-void storeImageInRingBuffer(const String &base64Str, const String &labelName, int confidence)
+void storeImageInRingBuffer(const String &base64Str, const String &labelName, int score)
 {
     if (base64Str.length() == 0)
     {
@@ -500,7 +478,7 @@ void storeImageInRingBuffer(const String &base64Str, const String &labelName, in
     }
 
     imageLengths[writeIndex] = actualBinaryLen;
-    imageMetadata[writeIndex] = "Target: " + labelName + " (" + String(confidence) + "%)";
+    imageMetadata[writeIndex] = "Target: " + labelName + " (" + String(score) + "%)";
 
     if (Serial)
     {

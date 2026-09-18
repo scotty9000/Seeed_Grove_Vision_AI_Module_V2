@@ -146,19 +146,19 @@
             <button id="downloadBtn">2. Download & Render Image</button>
             <button id="clearBtn" style="background: #dc2626; margin-top: 5px;">Clear Device Slots</button>
 
-            <!-- 🎯 DETECTION CONFIDENCE CONTROLLER -->
+            <!-- 🎯 DETECTION SCORE CONTROLLER -->
             <div
                 style="margin: 15px 0; text-align: left; background: #f8fafc; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                    <label for="confidenceSlider" style="font-size: 14px; font-weight: 600; color: #475569;">Detection
-                        Confidence:</label>
-                    <span id="confidenceVal" style="font-weight: 700; color: #2563eb; font-size: 15px;">50%</span>
+                    <label for="scoreSlider" style="font-size: 14px; font-weight: 600; color: #475569;">Detection
+                        Score:</label>
+                    <span id="scoreVal" style="font-weight: 700; color: #2563eb; font-size: 15px;">50%</span>
                 </div>
-                <input type="range" id="confidenceSlider" min="50" max="95" value="50" step="5"
+                <input type="range" id="scoreSlider" min="50" max="95" value="50" step="5"
                     style="width: 100%; cursor: pointer;">
-                <button id="setConfidenceBtn"
+                <button id="setScoreBtn"
                     style="background: #3b82f6; padding: 10px 16px; font-size: 14px; margin-top: 10px; width: 100%;">Apply
-                    Confidence</button>
+                    Score</button>
             </div>
         </div>
 
@@ -239,18 +239,18 @@
                 await counterChar.startNotifications();
                 counterChar.addEventListener('characteristicvaluechanged', handleLiveCounterUpdate);
 
-                // Read active confidence threshold from control register
+                // Read active score threshold from control register
                 try {
                     const controlVal = await controlChar.readValue();
                     if (controlVal.byteLength > 0) {
                         const currentConf = controlVal.getUint8(0);
                         if (currentConf >= 50 && currentConf <= 100) {
-                            document.getElementById('confidenceSlider').value = currentConf;
-                            document.getElementById('confidenceVal').innerText = `${currentConf}%`;
+                            document.getElementById('scoreSlider').value = currentConf;
+                            document.getElementById('scoreVal').innerText = `${currentConf}%`;
                         }
                     }
                 } catch (confErr) {
-                    console.log("Could not read initial confidence:", confErr);
+                    console.log("Could not read initial score:", confErr);
                 }
 
                 document.getElementById('status').innerText = "Status: Connected and ready!";
@@ -376,18 +376,18 @@
             }
         });
 
-        // STEP D: Adjust Detection Confidence Threshold
-        document.getElementById('confidenceSlider').addEventListener('input', (e) => {
-            document.getElementById('confidenceVal').innerText = `${e.target.value}%`;
+        // STEP D: Adjust Detection Score Threshold
+        document.getElementById('scoreSlider').addEventListener('input', (e) => {
+            document.getElementById('scoreVal').innerText = `${e.target.value}%`;
         });
 
-        document.getElementById('setConfidenceBtn').addEventListener('click', async () => {
-            const val = parseInt(document.getElementById('confidenceSlider').value);
-            document.getElementById('status').innerText = `Status: Setting confidence threshold to ${val}%...`;
-            document.getElementById('setConfidenceBtn').disabled = true;
+        document.getElementById('setScoreBtn').addEventListener('click', async () => {
+            const val = parseInt(document.getElementById('scoreSlider').value);
+            document.getElementById('status').innerText = `Status: Setting score threshold to ${val}%...`;
+            document.getElementById('setScoreBtn').disabled = true;
 
             try {
-                // Send 'T' (ASCII 84) followed by the confidence value byte
+                // Send 'T' (ASCII 84) followed by the score value byte
                 const commandPacket = new Uint8Array([84, val]);
                 await controlChar.writeValueWithResponse(commandPacket);
 
@@ -398,12 +398,12 @@
                 document.getElementById('metadata').innerText = metaText;
                 document.getElementById('metadata').style.display = 'block';
 
-                document.getElementById('status').innerText = `Status: Confidence threshold set to ${val}%.`;
+                document.getElementById('status').innerText = `Status: Score threshold set to ${val}%.`;
             } catch (error) {
-                document.getElementById('status').innerText = "Failed to set confidence: " + error.message;
+                document.getElementById('status').innerText = "Failed to set score: " + error.message;
                 console.error(error);
             } finally {
-                document.getElementById('setConfidenceBtn').disabled = false;
+                document.getElementById('setScoreBtn').disabled = false;
             }
         });
     </script>

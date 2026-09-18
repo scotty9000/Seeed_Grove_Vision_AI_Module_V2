@@ -43,6 +43,9 @@ const uint8_t PROGMEM testBlackSpot16x16[TEST_IMAGE_SIZE] = {
 #define BUFFER_SLOTS 4
 #define IMAGE_SLOT_SIZE 8000
 
+#define CAT (0)
+#define NO_CAT (1)
+
 unsigned char imageRingBuffer[BUFFER_SLOTS][IMAGE_SLOT_SIZE];
 uint32_t imageLengths[BUFFER_SLOTS] = {0, 0, 0, 0};
 String imageMetadata[BUFFER_SLOTS] = {"Empty Slot", "Empty Slot", "Empty Slot", "Empty Slot"};
@@ -390,7 +393,8 @@ void loop()
     {
         lastCheckTime = currentMillis;
 
-        int status = AI.invoke(1, false, true);
+        //int status = AI.invoke(1, false, true);
+        int status = AI.invoke(1, false, false);
 
         if (status < 0)
         {
@@ -402,43 +406,60 @@ void loop()
             return;
         }
 
-        // Evaluate bounding box detections
-        if (AI.boxes().size() > 0)
+        auto target = AI.classes()[0].target;
+        auto score  = AI.classes()[0].score;
+
+        if (target == CAT && score >= 70)
         {
-            int currentID = AI.boxes()[0].target;
-            int confidence = AI.boxes()[0].score;
-
-            // 🎯 DYNAMIC CONFIDENCE GATE CHECK
-            if (confidence >= detectionConfidenceThreshold)
+            if (Serial)
             {
-                lockoutTimerStart = currentMillis;
-                isLockoutActive = true;
-
-                totalMatchCounter++;
-                pCounterChar->setValue((uint8_t *)&totalMatchCounter, 4);
-                pCounterChar->notify();
-
-                String targetName = (currentID == 0) ? "CAT" : "DOG";
-
-                if (Serial)
-                {
-                    Serial.println("\n================================================");
-                    Serial.print("[TARGET DETECTED] Valid Match: ");
-                    Serial.println(targetName);
-                    Serial.print("[TARGET DETECTED] Confidence: ");
-                    Serial.print(confidence);
-                    Serial.print("% (Threshold: ");
-                    Serial.print(detectionConfidenceThreshold);
-                    Serial.println("%)");
-                    Serial.println("================================================");
-                }
-
-                String rawBase64 = AI.last_image();
-                storeImageInRingBuffer(rawBase64, targetName, confidence);
-
-                AI.invoke(1, true, false);
+                Serial.print("target=");
+                Serial.print(target);
+                Serial.print(" score=");
+                Serial.println(score);
+            
             }
         }
+
+
+
+        // // Evaluate bounding box detections
+        // if (AI.boxes().size() > 0)
+        // {
+        //     int currentID = AI.boxes()[0].target;
+        //     int confidence = AI.boxes()[0].score;
+
+        //     // 🎯 DYNAMIC CONFIDENCE GATE CHECK
+        //     if (confidence >= detectionConfidenceThreshold)
+        //     {
+        //         lockoutTimerStart = currentMillis;
+        //         isLockoutActive = true;
+
+        //         totalMatchCounter++;
+        //         pCounterChar->setValue((uint8_t *)&totalMatchCounter, 4);
+        //         pCounterChar->notify();
+
+        //         String targetName = (currentID == 0) ? "CAT" : "NO_CAT";
+
+        //         if (Serial)
+        //         {
+        //             Serial.println("\n================================================");
+        //             Serial.print("[TARGET DETECTED] Valid Match: ");
+        //             Serial.println(targetName);
+        //             Serial.print("[TARGET DETECTED] Confidence: ");
+        //             Serial.print(confidence);
+        //             Serial.print("% (Threshold: ");
+        //             Serial.print(detectionConfidenceThreshold);
+        //             Serial.println("%)");
+        //             Serial.println("================================================");
+        //         }
+
+        //         String rawBase64 = AI.last_image();
+        //         storeImageInRingBuffer(rawBase64, targetName, confidence);
+
+        //         AI.invoke(1, true, false);
+        //     }
+        // }
     }
 }
 

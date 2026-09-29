@@ -1,1 +1,0 @@
-Use unpack_garden_sources.py with Photos-1-001.zip, or place the 16 IMG_20260912_*.jpg files here.

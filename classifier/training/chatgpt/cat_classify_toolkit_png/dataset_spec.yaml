@@ -1,0 +1,112 @@
+project:
+  name: cat_notcat_garden_dataset
+  version: "2.1-api-free-dynamic-backgrounds"
+
+dataset:
+  image_width: 192
+  image_height: 192
+  color_mode: grayscale
+  final_format: png
+  jpeg_quality: 95
+  orientation: upright
+
+targets:
+  cat_train: 100
+  no_cat_train: 120
+  cat_test: 20
+  no_cat_test: 20
+
+baseline_expected:
+  cat_train: 40
+  no_cat_train: 40
+  cat_test: 20
+  no_cat_test: 20
+  lock_test_set: true
+
+workflow:
+  external_image_api: false
+  generation_method: "ChatGPT image editing using normal ChatGPT access"
+  one_candidate_per_image: true
+  manual_approval_required: false
+  contact_sheets_allowed: false
+  text_labels_inside_image_allowed: false
+  augmentation_copies_allowed: false
+  near_duplicates_allowed: false
+
+garden_sources:
+  directory: "garden_photos_square"
+  # No hard-coded filenames.
+  # Every JPG/JPEG/PNG/WEBP found in this folder is treated as an allowed real garden background.
+  minimum_required: 1
+  prefer_even_usage: true
+
+cat:
+  distance_m:
+    min: 1.0
+    max: 3.0
+    far_fraction: 0.35
+  placement: grass_only
+  coats:
+    - tabby
+    - black
+    - black_and_white
+    - white
+    - ginger
+    - tortoiseshell
+    - fluffy_tabby
+    - fluffy_black_and_white
+  poses:
+    - sitting
+    - walking
+    - lying_down
+    - crouching
+    - stalking
+    - squatting_defecating
+  directions:
+    - left
+    - right
+    - toward_camera
+    - away_from_camera
+    - diagonal_left
+    - diagonal_right
+    - rear_three_quarter
+    - looking_back
+
+no_cat:
+  mix_weights:
+    empty_garden: 0.10
+    birds: 0.35
+    people: 0.25
+    objects: 0.20
+    shadows: 0.10
+  birds:
+    - pigeon_single
+    - pigeon_pair
+    - magpie_single
+    - magpie_pair
+    - crow_single
+    - crow_pair
+    - blackbird
+    - robin_on_grass
+    - thrush
+  people:
+    - walking_person_lower_body
+    - crouching_gardener
+    - gardener_weeding
+  objects:
+    - watering_can
+    - wheelie_bin
+    - rake
+  shadows:
+    - tree_shadow
+    - branch_shadow
+    - strong_sun_shade_boundary
+  exclusions:
+    - rabbit
+    - dog
+    - fox
+    - hedgehog
+    - robin_on_birdbath
+    - isolated_boots
+    - night_scene
+    - infrared_scene

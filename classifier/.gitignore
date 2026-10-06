@@ -15,6 +15,7 @@ __pycache__/
 # Ignores your local dataset downloads and crop folders
 
 *.jpg
+*.png
 
 # ==========================================
 # 🧠 Compiled Deployment Packages & Binaries

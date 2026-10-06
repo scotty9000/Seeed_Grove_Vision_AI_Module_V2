@@ -120,11 +120,11 @@ Ask ChatGPT to generate:
     When sending a batch, use this exact pattern:
     1. upload the relevant square garden photos
     2. paste:
-    Use the square garden photos as the actual reference backgrounds.
+    Use the square garden photos (IMG_20260912_*) previously uploaded as the actual reference backgrounds.
     Generate one separate square colour master image per line.
     Do not make a collage or contact sheet.
     Preserve the background composition of the named square garden photo.
-    Return separate images named by candidate ID.
+    Return separate images named by candidate ID in a zip file for download link.
 
     3. then paste the candidate lines
 

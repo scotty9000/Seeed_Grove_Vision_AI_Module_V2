@@ -1,11 +1,9 @@
 import csv
 from pathlib import Path
 
-import yaml
-
 ROOT = Path(__file__).resolve().parent
 
-SPEC_FILE = ROOT / "dataset_spec.yaml"
+SOURCE_BACKGROUNDS = ROOT / "grass_backgrounds"
 MANIFEST = ROOT / "manifest.csv"
 
 IMAGE_BANK = ROOT / "image_bank"
@@ -26,18 +24,10 @@ MANIFEST_FIELDS = [
 ]
 
 
-def load_spec():
-    if not SPEC_FILE.exists():
-        raise FileNotFoundError(f"Missing {SPEC_FILE.name}")
-
-    with SPEC_FILE.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
 def garden_dir():
-    spec = load_spec()
-    rel = spec["garden_sources"]["directory"]
-    return ROOT / rel
+    # Kept under the old function name so existing scripts do not need changing.
+    # For the grass-only experiment, source backgrounds live here.
+    return SOURCE_BACKGROUNDS
 
 
 def ensure_dirs():
@@ -56,11 +46,11 @@ def garden_sources():
         if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
     )
 
-    minimum = int(load_spec()["garden_sources"].get("minimum_required", 1))
+    minimum = 1
 
     if len(sources) < minimum:
         raise RuntimeError(
-            f"Need at least {minimum} garden source image(s) in {gdir}"
+            f"Need at least {minimum} source background image(s) in {gdir}"
         )
 
     return sources

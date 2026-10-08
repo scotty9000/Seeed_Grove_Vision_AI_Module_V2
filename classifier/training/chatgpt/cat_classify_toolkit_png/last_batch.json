@@ -1,16 +1,16 @@
 {
-  "background": "GRASS_BG_0036.png",
+  "background": "GRASS_BG_0039.png",
   "candidate_ids": [
-    "CAT_0036",
-    "NO_CAT_0036",
-    "CAT_0037",
-    "NO_CAT_0037",
-    "CAT_0038",
-    "NO_CAT_0038",
-    "CAT_0039",
-    "NO_CAT_0039",
-    "CAT_0040",
-    "NO_CAT_0040"
+    "CAT_0051",
+    "NO_CAT_0051",
+    "CAT_0052",
+    "NO_CAT_0052",
+    "CAT_0053",
+    "NO_CAT_0053",
+    "CAT_0054",
+    "NO_CAT_0054",
+    "CAT_0055",
+    "NO_CAT_0055"
   ],
-  "synced": false
+  "synced": true
 }

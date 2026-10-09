@@ -49,13 +49,8 @@ Do not upgrade or reinstall tools unless there is a reason to do so.
 In Edge Impulse Studio:
 
 1. Open the cat / no_cat project.
-2. Go to Deployment (left hand sidebar).
-3. Selecting Edge Impulse target: Seeed Grove Vision AI Module V2 (Himax WiseEye2) will generate a firmware.img and model_vela.tflite
-  but this may crash ith arena error when dloaded using sensecraft (),
-  so we will use C++ Deployment and TensorFlowLite Inference
-4. Press Build button
-5. Download the tensorflow lite (int8 quantized) model from the dashboard
-6. Do not use the float32 model for this WE2 deployment.
+2. Once Trained the model is available
+3. Download the tensorflow lite (int8 quantized) model from the dashboard
 
 Rename the file to something clear, for example:
 

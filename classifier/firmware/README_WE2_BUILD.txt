@@ -294,3 +294,12 @@ Then upload:
 
 using the same SenseCraft / Grove Vision AI V2 upload process that was stable
 with the earlier Vela model.
+
+
+FLASH TFLITE WITHOUT SenseCraft
+====================================
+python .\xmodem\xmodem_send.py `
+  --port=COM9 `
+  --baudrate=921600 `
+  --protocol=xmodem `
+  --model="C:\Repos\Seeed_Grove_Vision_AI_Module_V2\classifier\firmware\vela_output\cat_mobilenetv2_160_rgb_int8_vela.tflite 0x400000 0x00000"

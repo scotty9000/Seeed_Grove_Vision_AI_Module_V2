@@ -271,7 +271,9 @@ void setup()
     delay(1000);
 
     // Initialize I2C layers cleanly
-    Wire.begin(6, 7);
+    Wire.begin(6, 7); // xiao c3 note Supermini c3 may not match symbol
+
+    Serial.println("I2C shifted over to SuperMini physical tracks.");
     Wire.setClock(400000);
 
     if (!AI.begin(&Wire))

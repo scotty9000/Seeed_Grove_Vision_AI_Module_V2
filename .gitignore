@@ -64,3 +64,14 @@ secrets.h
 *.bak
 *.jpg
 
+# python
+build/
+dist/
+*.spec
+dataset_images/
+__pycache__/
+
+!**/releases/
+!**/releases/*.exe
+
+

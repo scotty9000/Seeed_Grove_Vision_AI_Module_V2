@@ -41,8 +41,8 @@
 #define INPUT_IMAGE_CHANNELS 3
 
 
-#define MB_CLS_INPUT_TENSOR_WIDTH   224
-#define MB_CLS_INPUT_TENSOR_HEIGHT  224
+#define MB_CLS_INPUT_TENSOR_WIDTH   160
+#define MB_CLS_INPUT_TENSOR_HEIGHT  160
 #define MB_CLS_INPUT_TENSOR_CHANNEL INPUT_IMAGE_CHANNELS
 
 
@@ -259,7 +259,12 @@ int cv_mb_cls_run(struct_yolov8_ob_algoResult *algoresult_yolov8n_ob) {
 
 
 
-		std::string cifar10_labels[] = {"airplane", "automobile", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck"};
+		//std::string cifar10_labels[] = {"airplane", "automobile", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck"};
+		std::string ei_labels[] = {"cat", "nocat"};
+		const int NUM_CLASSES = 2;
+		const int TARGET_CLASS_IDX = 0;       // 0 = "cat" (alphabetical order in Edge Impulse)
+		//const float CONF_THRESHOLD = 0.80f;   // 80% confidence required to trigger GPIO/LED
+		const float CONF_THRESHOLD = 0.00f;   // 80% confidence required to trigger GPIO/LED
 
 		float output_scale = ((TfLiteAffineQuantization*)(mb_cls_output->quantization.params))->scale->data[0];
 		int output_zeropoint = ((TfLiteAffineQuantization*)(mb_cls_output->quantization.params))->zero_point->data[0];
@@ -270,8 +275,8 @@ int cv_mb_cls_run(struct_yolov8_ob_algoResult *algoresult_yolov8n_ob) {
 		algoresult_yolov8n_ob->obr[0].bbox.y = 0;
 		algoresult_yolov8n_ob->obr[0].bbox.width = img_w;
 		algoresult_yolov8n_ob->obr[0].bbox.height = img_h;
-		// pick highest class
-		for(int i=1 ; i<10 ; i++)
+
+		for(int i=1 ; i<NUM_CLASSES ; i++)
 		{
  			float cond1 = ((float)mb_cls_output->data.int8[i] - (float)output_zeropoint) * output_scale;
 			float cond2 = algoresult_yolov8n_ob->obr[0].confidence;
@@ -282,22 +287,23 @@ int cv_mb_cls_run(struct_yolov8_ob_algoResult *algoresult_yolov8n_ob) {
 			}
 		}
 
-		xprintf("Result is %s\n",cifar10_labels[algoresult_yolov8n_ob->obr[0].class_idx].c_str());
-		// Drive User LED
-		// CIFAR-10 index 2 = "bird"
-		if (algoresult_yolov8n_ob->obr[0].class_idx == 2) {
-				hx_drv_gpio_set_out_value(GPIO20, GPIO_OUT_HIGH);     // Onboard USER_LED ON
-				hx_drv_gpio_set_out_value(AON_GPIO0, GPIO_OUT_HIGH);  // XIAO Pin D0 = 3.3V
-				xprintf("Result is %s [LED ON]\n", cifar10_labels[algoresult_yolov8n_ob->obr[0].class_idx].c_str());
-		} else {
-				hx_drv_gpio_set_out_value(GPIO20, GPIO_OUT_LOW);      // Onboard USER_LED OFF
-				hx_drv_gpio_set_out_value(AON_GPIO0, GPIO_OUT_LOW);   // XIAO Pin D0 = 0V
-				xprintf("Result is %s\n", cifar10_labels[algoresult_yolov8n_ob->obr[0].class_idx].c_str());
+		int top_class  = algoresult_yolov8n_ob->obr[0].class_idx;
+		float top_conf = algoresult_yolov8n_ob->obr[0].confidence;
+
+		if (top_class == TARGET_CLASS_IDX && top_conf >= CONF_THRESHOLD)
+		{
+			hx_drv_gpio_set_out_value(GPIO20, GPIO_OUT_HIGH);     // Onboard USER_LED ON
+			hx_drv_gpio_set_out_value(AON_GPIO0, GPIO_OUT_HIGH);  // XIAO Pin D0 = 3.3V
+			xprintf("MATCH: %s (%d%%) [GPIO HIGH]\n", ei_labels[top_class].c_str(), (int)(top_conf * 100));
+		}
+		else
+		{
+			hx_drv_gpio_set_out_value(GPIO20, GPIO_OUT_LOW);      // Onboard USER_LED OFF
+			hx_drv_gpio_set_out_value(AON_GPIO0, GPIO_OUT_LOW);   // XIAO Pin D0 = 0V
+			xprintf("Top: %s (%d%%)\n", ei_labels[top_class].c_str(), (int)(top_conf * 100));
 		}
 
-
-
-    }
+  }
 
 
 #ifdef UART_SEND_ALOGO_RESEULT

@@ -8,11 +8,10 @@ cd C:\Repos\Seeed_Grove_Vision_AI_Module_V2\EPII_CM55M_APP_S
 make clean
 make
 
-should generate an elf, copy it to
-..\EPII_CM55M_APP_S\obj_epii_evb_icv30_bdv10\gnu_epii_evb_WLCSP65\EPII_CM55M_gnu_epii_evb_WLCSP65_s.elf input_case1_secboot\
-then 
+should generate an elf, cd to ../we2_image_gen_local then copy the elf to inout_case1_secboot/
 cd ..\we2_image_gen_local\
-run this to gen an image
+cp ..\EPII_CM55M_APP_S\obj_epii_evb_icv30_bdv10\gnu_epii_evb_WLCSP65\EPII_CM55M_gnu_epii_evb_WLCSP65_s.elf input_case1_secboot\
+then run this to gen an image
 ./we2_local_image_gen project_case1_blp_wlcsp.json
 flash the image + (example) tflite to the we2
 PS C:\Repos\Seeed_Grove_Vision_AI_Module_V2> python xmodem\xmodem_send.py --port=COM9 --baudrate=921600 --protocol=xmodem --file=we2_image_gen_local\output_case1_sec_wlcsp\output.img --model="model_zoo\tflm_mb_cls\qat_pruning_model_vela.tflite 0xB7B000 0x0000

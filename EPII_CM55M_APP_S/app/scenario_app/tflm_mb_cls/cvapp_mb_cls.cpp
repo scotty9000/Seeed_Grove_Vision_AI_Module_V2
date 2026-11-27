@@ -41,8 +41,8 @@
 #define INPUT_IMAGE_CHANNELS 3
 
 
-#define MB_CLS_INPUT_TENSOR_WIDTH   160
-#define MB_CLS_INPUT_TENSOR_HEIGHT  160
+#define MB_CLS_INPUT_TENSOR_WIDTH   192
+#define MB_CLS_INPUT_TENSOR_HEIGHT  192
 #define MB_CLS_INPUT_TENSOR_CHANNEL INPUT_IMAGE_CHANNELS
 
 
@@ -176,6 +176,18 @@ int cv_mb_cls_init(bool security_enable, bool privilege_enable, uint32_t model_a
 		mb_cls_output = mb_cls_static_interpreter.output(0);
 	}
 
+	xprintf("IN: dims=[%d,%d,%d,%d] bytes=%d type=%d scale=%d/10000 zp=%d\n",
+	        mb_cls_input->dims->data, mb_cls_input->dims->data,
+	        mb_cls_input->dims->data, mb_cls_input->dims->data,
+	        mb_cls_input->bytes, mb_cls_input->type,
+	        (int)(mb_cls_input->params.scale * 10000), mb_cls_input->params.zero_point);
+	xprintf("OUT: dims=[%d,%d] bytes=%d type=%d scale=%d/10000 zp=%d\n",
+	        mb_cls_output->dims->data, mb_cls_output->dims->data,
+	        mb_cls_output->bytes, mb_cls_output->type,
+	        (int)(mb_cls_output->params.scale * 10000), mb_cls_output->params.zero_point);
+
+
+
 	xprintf("initial done\n");
 	return ercode;
 }
@@ -198,14 +210,53 @@ int cv_mb_cls_run(struct_yolov8_ob_algoResult *algoresult_yolov8n_ob) {
 		#ifdef EACH_STEP_TICK
 			SystemGetTick(&systick_1, &loop_cnt_1);
 		#endif
-    	//get image from sensor and resize
-		w_scale = (float)(img_w - 1) / (MB_CLS_INPUT_TENSOR_WIDTH - 1);
-		h_scale = (float)(img_h - 1) / (MB_CLS_INPUT_TENSOR_HEIGHT - 1);
+    // 	//get image from sensor and resize
+		// w_scale = (float)(img_w - 1) / (MB_CLS_INPUT_TENSOR_WIDTH - 1);
+		// h_scale = (float)(img_h - 1) / (MB_CLS_INPUT_TENSOR_HEIGHT - 1);
 
 
-		hx_lib_image_resize_BGR8U3C_to_RGB24_helium((uint8_t*)raw_addr, (uint8_t*)mb_cls_input->data.data,
-		                    img_w, img_h, ch,
-                        	MB_CLS_INPUT_TENSOR_WIDTH, MB_CLS_INPUT_TENSOR_HEIGHT, w_scale,h_scale);
+		// hx_lib_image_resize_BGR8U3C_to_RGB24_helium((uint8_t*)raw_addr, (uint8_t*)mb_cls_input->data.data,
+		//                     img_w, img_h, ch,
+    //                     	MB_CLS_INPUT_TENSOR_WIDTH, MB_CLS_INPUT_TENSOR_HEIGHT, w_scale,h_scale);
+
+
+			static bool printed_once = false;
+	if (!printed_once) {
+		uint8_t *p = (uint8_t*)raw_addr;
+		uint32_t plane_sz = img_w * img_h;
+		xprintf("RAW: w=%d h=%d ch=%d p0=[%d,%d,%d,%d] plane1=[%d,%d] plane2=[%d,%d]\n",
+		        img_w, img_h, ch,
+		        p, p, p, p,
+		        p[plane_sz], p[plane_sz + 1],
+		        p[2 * plane_sz], p[2 * plane_sz + 1]);
+		printed_once = true;
+	}
+
+
+		// Center-crop 240x240 from 320x240 planar RGB ("Fit shortest axis") and resize to 192x192 int8
+		uint32_t crop_size = (img_w < img_h) ? img_w : img_h; // 240 for 320x240
+		uint32_t crop_x = (img_w - crop_size) / 2;            // 40 px left offset
+		uint32_t crop_y = (img_h - crop_size) / 2;            // 0 px top offset
+		uint32_t plane_sz = img_w * img_h;
+
+		uint8_t *r_plane = (uint8_t*)raw_addr;
+		uint8_t *g_plane = (uint8_t*)raw_addr + plane_sz;
+		uint8_t *b_plane = (uint8_t*)raw_addr + 2 * plane_sz;
+		int8_t  *dst     = (int8_t*)mb_cls_input->data.data;
+
+		for (int y = 0; y < MB_CLS_INPUT_TENSOR_HEIGHT; ++y) {
+			int src_y = crop_y + (y * crop_size) / MB_CLS_INPUT_TENSOR_HEIGHT;
+			for (int x = 0; x < MB_CLS_INPUT_TENSOR_WIDTH; ++x) {
+				int src_x = crop_x + (x * crop_size) / MB_CLS_INPUT_TENSOR_WIDTH;
+				int src_idx = src_y * img_w + src_x;
+				int dst_idx = (y * MB_CLS_INPUT_TENSOR_WIDTH + x) * 3;
+				dst[dst_idx + 0] = (int8_t)((int)r_plane[src_idx] - 128);
+				dst[dst_idx + 1] = (int8_t)((int)g_plane[src_idx] - 128);
+				dst[dst_idx + 2] = (int8_t)((int)b_plane[src_idx] - 128);
+			}
+		}
+
+
 		#ifdef EACH_STEP_TICK
 			SystemGetTick(&systick_2, &loop_cnt_2);
 			dbg_printf(DBG_LESS_INFO,"Tick for resize image BGR8U3C_to_RGB24_helium for MB CLS:[%d]\r\n",(loop_cnt_2-loop_cnt_1)*CPU_CLK+(systick_1-systick_2));
@@ -215,10 +266,6 @@ int cv_mb_cls_run(struct_yolov8_ob_algoResult *algoresult_yolov8n_ob) {
 			SystemGetTick(&systick_1, &loop_cnt_1);
 		#endif
 
-		// //uint8 to int8
-		for (int i = 0; i < mb_cls_input->bytes; ++i) {
-			*((int8_t *)mb_cls_input->data.data+i) = *((int8_t *)mb_cls_input->data.data+i) - 128;
-    	}
 
 		#ifdef EACH_STEP_TICK
 		SystemGetTick(&systick_2, &loop_cnt_2);

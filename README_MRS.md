@@ -20,7 +20,6 @@ PS C:\Repos\Seeed_Grove_Vision_AI_Module_V2> python xmodem\xmodem_send.py --port
 Using the Cat classifier  tflite :
 python xmodem\xmodem_send.py --port=COM9 --baudrate=921600 --protocol=xmodem --file=we2_image_gen_local\output_case1_sec_wlcsp\output.img --model="classifier\firmware\vela_output\cat_mobilenetv2_160_rgb_int8_vela.tflite 0xB7B000 0x0000"
 
-cat_mobilenetv2_160_rgb_int8_vela
 
 b''
 b'!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
